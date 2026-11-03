@@ -1,0 +1,10 @@
+{
+  "name": "GameVoice AI",
+  "short_name": "GameVoice AI",
+  "lang": "ru",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#101012",
+  "theme_color": "#111114",
+  "orientation": "landscape"
+}
