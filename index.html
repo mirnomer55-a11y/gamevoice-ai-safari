@@ -2,76 +2,229 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111114">
-  <meta name="description" content="Локальная озвучка русских игровых субтитров через камеру iPhone.">
-  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="description" content="Озвучка русских игровых субтитров через камеру iPhone.">
+  <link rel="manifest" href="./manifest.webmanifest">
   <title>GameVoice AI</title>
+
   <style>
-    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #101012; color: #f5f5f7; min-height: 100vh; }
-    button, select { font: inherit; }
-    .app { min-height: 100svh; padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
-    header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin: 0 0 12px; }
-    h1 { font-size: clamp(20px, 3vw, 28px); margin:0; }
-    .tag { color:#aaaab2; font-size:12px; }
-    .layout { display:grid; grid-template-columns:minmax(0, 2.45fr) minmax(270px, 1fr); gap:14px; height:calc(100svh - 74px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); min-height:360px; }
-    .camera-card { position:relative; overflow:hidden; min-width:0; min-height:0; background:#050506; border-radius:18px; }
-    video { width:100%; height:100%; display:block; object-fit:cover; }
-    .overlay { position:absolute; inset:0; touch-action:none; user-select:none; }
-    .selection { position:absolute; border:2px solid #ffd400; background:rgba(255,212,0,.12); border-radius:2px; min-width:32px; min-height:28px; }
-    .handle { position:absolute; width:18px; height:18px; border-radius:50%; background:#ffd400; border:2px solid #161616; transform:translate(-50%,-50%); }
-    .handle.tl { left:0;top:0 }.handle.tr { left:100%;top:0 }.handle.bl { left:0;top:100% }.handle.br { left:100%;top:100% }
-    .hint { position:absolute; top:10px; left:10px; max-width:calc(100% - 20px); padding:8px 10px; border-radius:9px; background:rgba(0,0,0,.72); font-size:12px; pointer-events:none; }
-    .controls { overflow:auto; min-width:0; padding:2px 2px 8px; display:flex; flex-direction:column; gap:12px; }
-    .primary { border:0; border-radius:999px; min-height:58px; background:#6673f6; color:white; font-weight:700; padding:12px 16px; }
-    .primary.stop { background:#ed3d4a; }
-    .secondary { border:1px solid #37373d; border-radius:12px; background:#1b1b20; color:#fff; padding:10px 12px; }
-    label { display:block; color:#aaaab2; font-size:13px; margin-bottom:5px; }
-    select { width:100%; background:#1b1b20; color:white; border:1px solid #37373d; border-radius:10px; padding:10px; }
-    .card { background:#1b1b20; border-radius:14px; padding:12px; }
-    .status { color:#b8b8c0; font-size:14px; line-height:1.35; min-height:36px; }
-    .recognized { min-height:65px; max-height:110px; overflow:auto; line-height:1.45; overflow-wrap:anywhere; }
-    .small { color:#93939c; font-size:12px; line-height:1.4; }
-    .rotate { display:none; position:fixed; inset:0; z-index:10; background:#101012; align-items:center; justify-content:center; text-align:center; padding:30px; color:#ddd; }
-    @media (orientation:portrait) {
-      .layout { display:none; }
-      .rotate { display:flex; }
-      header { margin-bottom:0; }
+    :root {
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    @media (max-height:430px) and (orientation:landscape) {
-      .layout { height:calc(100svh - 54px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); gap:10px; }
-      .controls { gap:8px; }
-      .primary { min-height:48px; }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #101012;
+      color: #f5f5f7;
+      min-height: 100vh;
+    }
+
+    button, select { font: inherit; }
+
+    .app {
+      min-height: 100svh;
+      padding:
+        max(14px, env(safe-area-inset-top))
+        max(14px, env(safe-area-inset-right))
+        max(14px, env(safe-area-inset-bottom))
+        max(14px, env(safe-area-inset-left));
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    h1 { margin: 0; font-size: clamp(20px, 3vw, 28px); }
+    .tag { color: #aaaab2; font-size: 12px; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 2.45fr) minmax(210px, 1fr);
+      gap: 14px;
+      height: calc(100svh - 74px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+      min-height: 180px;
+    }
+
+    .camera-card {
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+      min-height: 0;
+      background: #050506;
+      border-radius: 18px;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .selection {
+      position: absolute;
+      border: 2px solid #ffd400;
+      background: rgba(255, 212, 0, 0.12);
+      border-radius: 2px;
+    }
+
+    .handle {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ffd400;
+      border: 2px solid #161616;
+      transform: translate(-50%, -50%);
+    }
+
+    .tl { left: 0; top: 0; }
+    .tr { left: 100%; top: 0; }
+    .bl { left: 0; top: 100%; }
+    .br { left: 100%; top: 100%; }
+
+    .hint {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      max-width: calc(100% - 20px);
+      padding: 8px 10px;
+      border-radius: 9px;
+      background: rgba(0, 0, 0, 0.72);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .controls {
+      overflow: auto;
+      min-width: 0;
+      padding: 2px 2px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .controls > * { flex-shrink: 0; }
+
+    .primary {
+      border: 0;
+      border-radius: 999px;
+      min-height: 54px;
+      background: #6673f6;
+      color: white;
+      font-weight: 700;
+      padding: 12px 16px;
+    }
+
+    .primary:disabled { opacity: 0.5; }
+    .primary.stop { background: #ed3d4a; }
+
+    .secondary, select {
+      border: 1px solid #37373d;
+      border-radius: 12px;
+      background: #1b1b20;
+      color: #fff;
+      padding: 10px 12px;
+    }
+
+    select { width: 100%; }
+
+    label, .field-title {
+      display: block;
+      color: #aaaab2;
+      font-size: 13px;
+      margin-bottom: 5px;
+    }
+
+    .status { color: #b8b8c0; font-size: 14px; line-height: 1.35; }
+
+    .recognized {
+      min-height: 65px;
+      max-height: 110px;
+      overflow: auto;
+      border-radius: 14px;
+      background: #1b1b20;
+      padding: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .small { color: #93939c; font-size: 12px; line-height: 1.4; }
+
+    .rotate {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #101012;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 30px;
+      color: #ddd;
+    }
+
+    @media (orientation: portrait) {
+      .layout { display: none; }
+      .rotate { display: flex; }
+    }
+
+    @media (max-height: 430px) and (orientation: landscape) {
+      .layout {
+        height: calc(100svh - 58px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        gap: 10px;
+      }
+      .controls { gap: 8px; }
+      .primary { min-height: 46px; }
     }
   </style>
 </head>
+
 <body>
   <main class="app">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Пробная веб-версия</span>
+      <span class="tag">Пробная веб-версия 0.4</span>
     </header>
+
     <section class="layout" aria-label="Озвучка субтитров">
-      <div class="camera-card" id="cameraCard">
+      <div class="camera-card">
         <video id="video" playsinline muted></video>
         <div class="overlay" id="overlay" aria-label="Область субтитров">
           <div class="selection" id="selection">
-            <i class="handle tl"></i><i class="handle tr"></i><i class="handle bl"></i><i class="handle br"></i>
+            <i class="handle tl"></i><i class="handle tr"></i>
+            <i class="handle bl"></i><i class="handle br"></i>
           </div>
         </div>
         <div class="hint">Перемещайте рамку внутри. Потяните за угол, чтобы изменить размер.</div>
       </div>
+
       <aside class="controls">
         <button class="primary" id="startCamera">Включить камеру</button>
-        <button class="primary" id="toggleReading" disabled>Начать распознавание</button>
+        <button class="primary" id="toggleReading" disabled>Начать озвучку</button>
         <button class="secondary" id="testVoice">Проверить голос</button>
-        <div class="status" id="status" role="status">Поверните iPhone горизонтально и разрешите Safari доступ к камере.</div>
+        <div class="status" id="status" role="status">Включите камеру и выделите область субтитров.</div>
+
         <div>
           <label for="voice">Русский голос</label>
           <select id="voice"><option>Загрузка голосов…</option></select>
         </div>
+
         <div>
           <label for="speed">Скорость речи</label>
           <select id="speed">
@@ -80,187 +233,496 @@
             <option value="1.5">1,5×</option>
           </select>
         </div>
+
         <div>
-          <label>Последний распознанный текст</label>
-          <div class="card recognized" id="recognized">Здесь появятся субтитры</div>
+          <span class="field-title">Последняя реплика для озвучки</span>
+          <div class="recognized" id="recognized">Здесь появятся субтитры</div>
         </div>
-        <div class="small">Камера и распознавание работают в браузере. Видеокадры не загружаются на сервер. Для первой загрузки OCR-движка и русского языкового файла нужен интернет.</div>
+
+        <div class="small">
+          Кадры обрабатываются на iPhone. Для первой загрузки распознавания нужен интернет.
+        </div>
       </aside>
     </section>
   </main>
-  <div class="rotate">GameVoice AI работает в альбомной ориентации.<br><br>Поверните iPhone горизонтально.</div>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
+
+  <div class="rotate">
+    GameVoice AI работает в альбомной ориентации.<br><br>
+    Поверните iPhone горизонтально.
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"
+          crossorigin="anonymous"></script>
+
   <script>
     (() => {
       'use strict';
-      const $ = id => document.getElementById(id);
-      const video = $('video'), overlay = $('overlay'), selection = $('selection');
-      const statusEl = $('status'), recognized = $('recognized');
-      const cameraButton = $('startCamera'), readButton = $('toggleReading');
-      const testVoiceButton = $('testVoice');
-      const voiceSelect = $('voice'), speedSelect = $('speed');
-      const state = { stream:null, worker:null, reading:false, busy:false, timer:0, rect:{x:.12,y:.69,w:.76,h:.23}, mode:'', start:null, initial:null, voices:[], candidate:'', candidateCount:0, lastSpoken:'', blankAt:0, lastText:'' };
-      const sayStatus = value => { statusEl.textContent = value; };
-      const saveRect = () => { try { localStorage.setItem('gva.rect', JSON.stringify(state.rect)); } catch {} };
-      try { const saved=JSON.parse(localStorage.getItem('gva.rect')||'null'); if(saved && saved.w>0 && saved.h>0) state.rect=saved; } catch {}
+
+      const byId = id => document.getElementById(id);
+      const video = byId('video');
+      const overlay = byId('overlay');
+      const selection = byId('selection');
+      const statusEl = byId('status');
+      const recognized = byId('recognized');
+      const cameraButton = byId('startCamera');
+      const readButton = byId('toggleReading');
+      const voiceSelect = byId('voice');
+      const speedSelect = byId('speed');
+      const speech = window.speechSynthesis;
+      const placeholder = 'Здесь появятся субтитры';
+
+      const state = {
+        stream: null,
+        cameraRun: 0,
+        workerPromise: null,
+        reading: false,
+        run: 0,
+        timer: 0,
+        busy: false,
+        voices: [],
+        rect: { x: 0.12, y: 0.69, w: 0.76, h: 0.23 },
+        rectVersion: 0,
+        drag: null,
+        candidate: '',
+        candidateCount: 0,
+        lastSpoken: '',
+        blankAt: null,
+        currentSpeech: null,
+        pendingSpeech: null
+      };
+
+      function status(text) { statusEl.textContent = text; }
+      function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+      function setting(key) {
+        try { return localStorage.getItem(key); }
+        catch { return null; }
+      }
+
+      function save(key, value) {
+        try { localStorage.setItem(key, value); }
+        catch { /* Safari может ограничить сохранение настроек. */ }
+      }
+
+      function resetCandidate() {
+        state.candidate = '';
+        state.candidateCount = 0;
+        state.blankAt = null;
+      }
 
       function paintSelection() {
-        selection.style.left=(state.rect.x*100)+'%'; selection.style.top=(state.rect.y*100)+'%';
-        selection.style.width=(state.rect.w*100)+'%'; selection.style.height=(state.rect.h*100)+'%';
+        const r = state.rect;
+        selection.style.left = r.x * 100 + '%';
+        selection.style.top = r.y * 100 + '%';
+        selection.style.width = r.w * 100 + '%';
+        selection.style.height = r.h * 100 + '%';
       }
+
+      try {
+        const r = JSON.parse(setting('gva.rect') || 'null');
+        if (r && [r.x, r.y, r.w, r.h].every(Number.isFinite) &&
+            r.x >= 0 && r.y >= 0 && r.w > 0 && r.h > 0 &&
+            r.x + r.w <= 1.00001 && r.y + r.h <= 1.00001) {
+          state.rect = r;
+        }
+      } catch {}
       paintSelection();
 
-      function corners(box) { return [{x:box.x,y:box.y},{x:box.x+box.w,y:box.y},{x:box.x,y:box.y+box.h},{x:box.x+box.w,y:box.y+box.h}]; }
-      function pointerPoint(event) { const r=overlay.getBoundingClientRect(); return {x:(event.clientX-r.left)/r.width,y:(event.clientY-r.top)/r.height}; }
+      function corners(r) {
+        return [
+          { x: r.x, y: r.y }, { x: r.x + r.w, y: r.y },
+          { x: r.x, y: r.y + r.h }, { x: r.x + r.w, y: r.y + r.h }
+        ];
+      }
+
+      function point(event) {
+        const box = overlay.getBoundingClientRect();
+        return {
+          x: clamp((event.clientX - box.left) / box.width, 0, 1),
+          y: clamp((event.clientY - box.top) / box.height, 0, 1)
+        };
+      }
+
       overlay.addEventListener('pointerdown', event => {
-        if(!state.stream) return;
-        const p=pointerPoint(event), box={...state.rect};
-        const ds=corners(box).map(q=>Math.hypot((q.x-p.x)*overlay.clientWidth,(q.y-p.y)*overlay.clientHeight));
-        const nearest=ds.indexOf(Math.min(...ds));
-        state.mode=Math.min(...ds)<30 ? 'resize'+nearest : (p.x>=box.x&&p.x<=box.x+box.w&&p.y>=box.y&&p.y<=box.y+box.h ? 'move':'new');
-        state.start=p; state.initial=box; overlay.setPointerCapture(event.pointerId); event.preventDefault();
-      });
-      overlay.addEventListener('pointermove', event => {
-        if(!state.mode) return;
-        const p=pointerPoint(event), a=state.start, box=state.initial;
-        let next;
-        if(state.mode==='move') {
-          next={...box,x:Math.max(0,Math.min(1-box.w,box.x+p.x-a.x)),y:Math.max(0,Math.min(1-box.h,box.y+p.y-a.y))};
-        } else if(state.mode==='new') {
-          next={x:Math.min(a.x,p.x),y:Math.min(a.y,p.y),w:Math.abs(p.x-a.x),h:Math.abs(p.y-a.y)};
-        } else {
-          const idx=Number(state.mode.slice(6)), c=corners(box), anchor=c[3-idx];
-          const x=Math.max(0,Math.min(1,p.x)), y=Math.max(0,Math.min(1,p.y));
-          next={x:Math.min(anchor.x,x),y:Math.min(anchor.y,y),w:Math.abs(x-anchor.x),h:Math.abs(y-anchor.y)};
-        }
-        if(next.w>.025 && next.h>.025) { state.rect=next; paintSelection(); }
+        if (!state.stream || state.drag) return;
+        const p = point(event);
+        const box = { ...state.rect };
+        const distances = corners(box).map(c => Math.hypot(
+          (c.x - p.x) * overlay.clientWidth, (c.y - p.y) * overlay.clientHeight
+        ));
+        const nearest = distances.indexOf(Math.min(...distances));
+        const inside = p.x >= box.x && p.x <= box.x + box.w &&
+                       p.y >= box.y && p.y <= box.y + box.h;
+
+        state.drag = {
+          id: event.pointerId, start: p, box,
+          mode: distances[nearest] < 30 ? 'resize' : inside ? 'move' : 'new',
+          anchor: corners(box)[3 - nearest]
+        };
+        overlay.setPointerCapture(event.pointerId);
         event.preventDefault();
       });
-      const finishDrag=()=>{ if(state.mode){ state.mode=''; saveRect(); } };
-      overlay.addEventListener('pointerup',finishDrag); overlay.addEventListener('pointercancel',finishDrag);
 
-      cameraButton.addEventListener('click', async () => {
-        try {
-          if(!navigator.mediaDevices?.getUserMedia) throw new Error('Safari не открыл камеру. Откройте сайт по защищённому HTTPS-адресу.');
-          if(state.stream) { state.stream.getTracks().forEach(track=>track.stop()); state.stream=null; video.srcObject=null; cameraButton.textContent='Включить камеру'; readButton.disabled=true; state.reading=false; readButton.textContent='Начать распознавание'; sayStatus('Камера выключена.'); return; }
-          state.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-          video.srcObject=state.stream; await video.play(); cameraButton.textContent='Выключить камеру'; readButton.disabled=false; sayStatus('Камера готова. Выберите область субтитров и начните распознавание.');
-        } catch(error) { sayStatus(error.message || 'Не удалось открыть камеру. Проверьте разрешение Safari для этого сайта.'); }
+      overlay.addEventListener('pointermove', event => {
+        const drag = state.drag;
+        if (!drag || drag.id !== event.pointerId) return;
+        const p = point(event);
+        let next;
+
+        if (drag.mode === 'move') {
+          next = {
+            ...drag.box,
+            x: clamp(drag.box.x + p.x - drag.start.x, 0, 1 - drag.box.w),
+            y: clamp(drag.box.y + p.y - drag.start.y, 0, 1 - drag.box.h)
+          };
+        } else {
+          const anchor = drag.mode === 'new' ? drag.start : drag.anchor;
+          next = {
+            x: Math.min(anchor.x, p.x), y: Math.min(anchor.y, p.y),
+            w: Math.abs(anchor.x - p.x), h: Math.abs(anchor.y - p.y)
+          };
+        }
+
+        if (next.w > 0.025 && next.h > 0.025) {
+          state.rect = next;
+          state.rectVersion++;
+          resetCandidate();
+          paintSelection();
+        }
+        event.preventDefault();
       });
+
+      function finishDrag(event) {
+        if (state.drag?.id !== event.pointerId) return;
+        state.drag = null;
+        save('gva.rect', JSON.stringify(state.rect));
+      }
+
+      overlay.addEventListener('pointerup', finishDrag);
+      overlay.addEventListener('pointercancel', finishDrag);
 
       function loadVoices() {
-        const all=window.speechSynthesis?.getVoices?.()||[];
-        const russian=all.filter(v=>/^ru(?:-|$)/i.test(v.lang));
-        const previous=localStorage.getItem('gva.voice');
-        state.voices=russian; voiceSelect.replaceChildren();
-        if(!russian.length) { const o=document.createElement('option'); o.textContent='Русские голоса Safari не найдены'; voiceSelect.append(o); return; }
-        russian.forEach(v=>{ const o=document.createElement('option'); o.value=v.voiceURI; o.textContent=v.name+' — '+v.lang; voiceSelect.append(o); });
-        const preferred=russian.find(v=>/милена|milena/i.test(v.name));
-        voiceSelect.value=(russian.some(v=>v.voiceURI===previous)?previous:(preferred||russian[0]).voiceURI);
-      }
-      if(window.speechSynthesis) { loadVoices(); speechSynthesis.addEventListener('voiceschanged',loadVoices); }
-      voiceSelect.addEventListener('change',()=>localStorage.setItem('gva.voice',voiceSelect.value));
-      testVoiceButton.addEventListener('click',()=>{
-        if(!window.speechSynthesis) { sayStatus('Синтез речи в этом браузере недоступен.'); return; }
-        speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance('Проверка русского голоса.');
-        utterance.lang = 'ru-RU';
-        utterance.voice = state.voices.find(v => v.voiceURI === voiceSelect.value) || null;
-        utterance.rate = Number(speedSelect.value) || 1;
-        utterance.onstart = () => sayStatus('Проверяю выбранный голос…');
-        utterance.onend = () => sayStatus('Голос работает. Можно начинать распознавание.');
-        utterance.onerror = event => sayStatus('Safari не запустил голос: ' + (event.error || 'неизвестная ошибка') + '. Проверьте звук iPhone и выбранный голос.');
-        speechSynthesis.speak(utterance);
-      });
-      speedSelect.addEventListener('change',()=>localStorage.setItem('gva.speed',speedSelect.value));
-      speedSelect.value=localStorage.getItem('gva.speed')||'1';
+        const voices = (speech?.getVoices() || []).filter(v => /^ru(?:[-_]|$)/i.test(v.lang));
+        const saved = setting('gva.voice');
+        state.voices = voices;
+        voiceSelect.replaceChildren();
 
-      async function getWorker() {
-        if(state.worker) return state.worker;
-        if(!window.Tesseract) throw new Error('Не загрузился OCR-движок. Проверьте интернет и обновите страницу.');
-        sayStatus('Загружаю локальный OCR и русский языковой файл. При первом запуске это может занять время…');
-        state.worker=await Tesseract.createWorker('rus',1,{
-          langPath:'https://tessdata.projectnaptha.com/4.0.0',
-          cacheMethod:'write',
-          logger:m=>{ if(m.status==='loading tesseract core') sayStatus('Загружаю OCR-движок…'); else if(m.status==='loading language traineddata') sayStatus('Загружаю русский языковой файл… '+Math.round((m.progress||0)*100)+'%'); }
-        });
-        return state.worker;
+        if (!voices.length) {
+          voiceSelect.add(new Option('Русский голос по умолчанию', ''));
+          return;
+        }
+
+        for (const voice of voices) {
+          voiceSelect.add(new Option(voice.name + ' — ' + voice.lang, voice.voiceURI));
+        }
+
+        const preferred = voices.find(v => v.voiceURI === saved) ||
+                          voices.find(v => /милена|milena/i.test(v.name)) || voices[0];
+        voiceSelect.value = preferred.voiceURI;
       }
+
+      loadVoices();
+      speech?.addEventListener('voiceschanged', loadVoices);
+      voiceSelect.addEventListener('change', () => save('gva.voice', voiceSelect.value));
+      const savedSpeed = setting('gva.speed');
+      speedSelect.value = ['0.5', '1', '1.5'].includes(savedSpeed) ? savedSpeed : '1';
+      speedSelect.addEventListener('change', () => save('gva.speed', speedSelect.value));
+
+      function utterance(text) {
+        const phrase = new SpeechSynthesisUtterance(text);
+        phrase.lang = 'ru-RU';
+        const voice = state.voices.find(v => v.voiceURI === voiceSelect.value);
+        if (voice) phrase.voice = voice;
+        phrase.rate = Number(speedSelect.value) || 1;
+        return phrase;
+      }
+
+      function clearSpeech() {
+        state.currentSpeech = null;
+        state.pendingSpeech = null;
+        speech?.cancel();
+      }
+
+      function speakSubtitle(text) {
+        if (state.currentSpeech) {
+          state.pendingSpeech = { text, time: performance.now() };
+          return;
+        }
+        const phrase = utterance(text);
+        state.currentSpeech = phrase;
+
+        phrase.onend = () => {
+          if (state.currentSpeech !== phrase) return;
+          state.currentSpeech = null;
+          const next = state.pendingSpeech;
+          state.pendingSpeech = null;
+          if (state.reading && next && performance.now() - next.time < 2500) {
+            speakSubtitle(next.text);
+          }
+        };
+
+        phrase.onerror = event => {
+          if (state.currentSpeech !== phrase) return;
+          stopReading('Safari не запустил голос (' + event.error + '). Нажмите «Проверить голос».');
+        };
+
+        speech.speak(phrase);
+      }
+
+      byId('testVoice').addEventListener('click', () => {
+        if (!speech) {
+          status('Синтез речи в этом браузере недоступен.');
+          return;
+        }
+        if (state.reading) stopReading('Распознавание остановлено для проверки голоса.');
+        clearSpeech();
+        const phrase = utterance('Проверка русского голоса.');
+        state.currentSpeech = phrase;
+        phrase.onend = () => {
+          if (state.currentSpeech !== phrase) return;
+          state.currentSpeech = null;
+          status('Проверка завершена. Можно начинать озвучку.');
+        };
+        phrase.onerror = event => {
+          if (state.currentSpeech !== phrase) return;
+          state.currentSpeech = null;
+          status('Safari не запустил голос (' + event.error + ').');
+        };
+        speech.speak(phrase);
+      });
+
+      function stopReading(message) {
+        state.reading = false;
+        state.run++;
+        clearTimeout(state.timer);
+        clearSpeech();
+        resetCandidate();
+        readButton.textContent = 'Начать озвучку';
+        readButton.classList.remove('stop');
+        status(message);
+      }
+
+      function closeCamera(message) {
+        state.cameraRun++;
+        stopReading(message);
+        const stream = state.stream;
+        state.stream = null;
+        stream?.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        cameraButton.disabled = false;
+        cameraButton.textContent = 'Включить камеру';
+        readButton.disabled = true;
+      }
+
+      cameraButton.addEventListener('click', async () => {
+        if (state.stream) {
+          closeCamera('Камера выключена.');
+          return;
+        }
+
+        cameraButton.disabled = true;
+        const run = ++state.cameraRun;
+        try {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Откройте приложение по HTTPS в Safari.');
+          }
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 }, height: { ideal: 1080 }
+            },
+            audio: false
+          });
+          if (state.cameraRun !== run) {
+            stream.getTracks().forEach(track => track.stop());
+            return;
+          }
+          state.stream = stream;
+          video.srcObject = stream;
+          await video.play();
+          if (state.cameraRun !== run) return;
+
+          cameraButton.textContent = 'Выключить камеру';
+          cameraButton.disabled = false;
+          readButton.disabled = false;
+          status('Камера готова. Выберите область субтитров и начните озвучку.');
+        } catch (error) {
+          if (state.cameraRun === run) {
+            closeCamera(error.name === 'NotAllowedError'
+              ? 'Разрешите Safari доступ к камере для этого сайта.'
+              : 'Не удалось открыть камеру. ' + error.message);
+          }
+        }
+      });
+
+      function getWorker() {
+        if (state.workerPromise) return state.workerPromise;
+        if (!window.Tesseract) throw new Error('Не загрузилось распознавание. Проверьте интернет и обновите страницу.');
+        status('Загружаю распознавание русского текста…');
+        state.workerPromise = Tesseract.createWorker('rus', 1, {
+          langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+          cacheMethod: 'write'
+        }).catch(error => {
+          state.workerPromise = null;
+          throw error;
+        });
+        return state.workerPromise;
+      }
+
+      const canvas = document.createElement('canvas');
 
       function cropSelection() {
-        const r=overlay.getBoundingClientRect(), vw=video.videoWidth, vh=video.videoHeight;
-        if(!vw||!vh) throw new Error('Камера ещё готовит кадр.');
-        const scale=Math.max(r.width/vw,r.height/vh), shownW=vw*scale, shownH=vh*scale;
-        const offsetX=(r.width-shownW)/2, offsetY=(r.height-shownH)/2;
-        const sx=(state.rect.x*r.width-offsetX)/scale, sy=(state.rect.y*r.height-offsetY)/scale;
-        const sw=state.rect.w*r.width/scale, sh=state.rect.h*r.height/scale;
-        const x=Math.max(0,Math.min(vw-1,sx)), y=Math.max(0,Math.min(vh-1,sy));
-        const w=Math.max(1,Math.min(vw-x,sw)), h=Math.max(1,Math.min(vh-y,sh));
-        const canvas=document.createElement('canvas');
-        const factor=Math.min(2,1000/Math.max(w,h));
-        canvas.width=Math.max(1,Math.round(w*factor)); canvas.height=Math.max(1,Math.round(h*factor));
-        canvas.getContext('2d',{willReadFrequently:true}).drawImage(video,x,y,w,h,0,0,canvas.width,canvas.height);
+        const box = overlay.getBoundingClientRect();
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (!vw || !vh || !box.width || !box.height) {
+          throw new Error('Поверните iPhone горизонтально и дождитесь изображения камеры.');
+        }
+
+        // Видео заполняет окно с обрезкой по краям (object-fit: cover).
+        const scale = Math.max(box.width / vw, box.height / vh);
+        const offsetX = (box.width - vw * scale) / 2;
+        const offsetY = (box.height - vh * scale) / 2;
+        const r = state.rect;
+        const x = clamp((r.x * box.width - offsetX) / scale, 0, vw - 1);
+        const y = clamp((r.y * box.height - offsetY) / scale, 0, vh - 1);
+        const w = clamp(r.w * box.width / scale, 1, vw - x);
+        const h = clamp(r.h * box.height / scale, 1, vh - y);
+
+        const factor = Math.min(2, 1000 / Math.max(w, h));
+        canvas.width = Math.max(1, Math.round(w * factor));
+        canvas.height = Math.max(1, Math.round(h * factor));
+        canvas.getContext('2d', { willReadFrequently: true })
+          .drawImage(video, x, y, w, h, 0, 0, canvas.width, canvas.height);
         return canvas;
       }
 
-      function normalize(text) { return text.toLocaleLowerCase('ru-RU').replace(/ё/g,'е').replace(/[^\p{L}\p{N}]/gu,''); }
-      function isRussianEnough(text) { return /[А-Яа-яЁё]/.test(text) && normalize(text).length>=3; }
-      function maybeSpeak(text,confidence) {
-        const now=Date.now(), key=normalize(text);
-        if(confidence<48 || !isRussianEnough(text)) { state.candidate=''; state.candidateCount=0; if(!state.blankAt) state.blankAt=now; if(now-state.blankAt>1800) state.lastSpoken=''; return; }
-        state.blankAt=0;
-        if(key===state.candidate) state.candidateCount++; else { state.candidate=key; state.candidateCount=1; }
-        if(state.candidateCount<2 || key===state.lastSpoken) return;
-        state.lastSpoken=key;
-        const voice=state.voices.find(v=>v.voiceURI===voiceSelect.value);
-        const utterance=new SpeechSynthesisUtterance(text.trim()); utterance.lang='ru-RU'; utterance.voice=voice||null; utterance.rate=Number(speedSelect.value)||1;
-        // Keep at most the current phrase. A newer line replaces a stale queued line.
-        speechSynthesis.cancel(); speechSynthesis.speak(utterance);
+      function normalize(text) {
+        return text.toLocaleLowerCase('ru-RU')
+          .replace(/ё/g, 'е')
+          .replace(/[^\p{L}\p{N}]/gu, '');
+      }
+
+      function similarText(left, right) {
+        if (!left || !right) return false;
+        if (left === right) return true;
+        const size = Math.max(left.length, right.length);
+        const limit = Math.floor(size / 6);
+        if (!limit || size > 600 || Math.abs(left.length - right.length) > limit) return false;
+
+        let row = Array.from({ length: right.length + 1 }, (_, i) => i);
+        for (let i = 1; i <= left.length; i++) {
+          const next = [i];
+          for (let j = 1; j <= right.length; j++) {
+            next[j] = Math.min(
+              next[j - 1] + 1,
+              row[j] + 1,
+              row[j - 1] + Number(left[i - 1] !== right[j - 1])
+            );
+          }
+          row = next;
+        }
+        return row[right.length] <= limit;
+      }
+
+      function maybeSpeak(text, confidence) {
+        const now = performance.now();
+        const key = normalize(text);
+        const words = text.match(/[а-яё]+/gi) || [];
+        const plausible = words.some(word => word.length >= 3) ||
+                          (words.length === 1 && words[0].length === 2 && confidence >= 80);
+
+        if (!plausible || confidence < 35) {
+          state.candidate = '';
+          state.candidateCount = 0;
+          if (state.blankAt === null) state.blankAt = now;
+          if (now - state.blankAt > 3000) state.lastSpoken = '';
+          return;
+        }
+
+        state.blankAt = null;
+        if (similarText(key, state.candidate)) {
+          state.candidateCount++;
+        } else {
+          state.candidate = key;
+          state.candidateCount = 1;
+        }
+
+        if (state.candidateCount < 2 || similarText(key, state.lastSpoken)) return;
+        state.lastSpoken = key;
+        recognized.textContent = text;
+        speakSubtitle(text);
+      }
+
+      function isCurrent(run) {
+        return state.reading && state.run === run;
       }
 
       async function scan() {
-        if(!state.reading || state.busy) return;
-        state.busy=true;
+        if (!state.reading || state.busy) return;
+        const run = state.run;
+        state.busy = true;
         try {
-          const worker=await getWorker();
-          const result=await worker.recognize(cropSelection(),{rotateAuto:true});
-          const text=(result.data.text||'').replace(/\s+/g,' ').trim();
-          if(text) { state.lastText=text; recognized.textContent=text; maybeSpeak(text,result.data.confidence||0); }
-          else maybeSpeak('',0);
-          sayStatus(text?'Распознаю субтитры в выделенной рамке…':'Жду текст в выделенной рамке…');
-        } catch(error) {
-          state.reading=false; readButton.textContent='Начать распознавание'; readButton.classList.remove('stop');
-          sayStatus(error.message || 'Ошибка OCR. Остановите и повторите запуск.');
+          const worker = await getWorker();
+          if (!isCurrent(run)) return;
+
+          const rectVersion = state.rectVersion;
+          const result = await worker.recognize(cropSelection(), { rotateAuto: true });
+          if (!isCurrent(run) || rectVersion !== state.rectVersion) return;
+
+          const text = (result.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+          maybeSpeak(text, Number(result.data.confidence) || 0);
+          if (isCurrent(run)) status('Ищу субтитры в выделенной рамке…');
+        } catch (error) {
+          if (isCurrent(run)) stopReading('Ошибка распознавания. ' + error.message);
         } finally {
-          state.busy=false;
-          if(state.reading) state.timer=setTimeout(scan,700);
+          state.busy = false;
+          if (state.reading) {
+            clearTimeout(state.timer);
+            state.timer = setTimeout(scan, state.run === run ? 450 : 0);
+          }
         }
       }
-      readButton.addEventListener('click',async()=>{
-        if(state.reading) { state.reading=false; clearTimeout(state.timer); speechSynthesis?.cancel(); readButton.textContent='Начать распознавание'; readButton.classList.remove('stop'); sayStatus('Распознавание остановлено.'); return; }
-        if(!state.stream) return;
-        if(!window.speechSynthesis) { sayStatus('Синтез речи в этом браузере недоступен.'); return; }
-        // iPhone Safari only allows speech synthesis after a direct user gesture.
-        // Unlock it synchronously here, before the OCR engine's asynchronous download.
-        try {
-          speechSynthesis.cancel();
-          const unlock = new SpeechSynthesisUtterance(' ');
-          unlock.lang = 'ru-RU';
-          unlock.volume = 0;
-          unlock.rate = 10;
-          const selectedVoice = state.voices.find(v => v.voiceURI === voiceSelect.value);
-          if (selectedVoice) unlock.voice = selectedVoice;
-          speechSynthesis.speak(unlock);
-        } catch {}
-        state.reading=true; state.candidate=''; state.candidateCount=0; state.lastSpoken=''; state.lastText=''; recognized.textContent='Здесь появятся субтитры';
-        readButton.textContent='Остановить озвучку'; readButton.classList.add('stop');
-        sayStatus('Запускаю распознавание и озвучку…');
-        try { await getWorker(); scan(); }
-        catch(error) { state.reading=false; readButton.textContent='Начать распознавание'; readButton.classList.remove('stop'); sayStatus(error.message||'Не удалось запустить OCR.'); }
+
+      readButton.addEventListener('click', () => {
+        if (state.reading) {
+          stopReading('Озвучка остановлена.');
+          return;
+        }
+        if (!state.stream) return;
+        if (!speech) {
+          status('Синтез речи в этом браузере недоступен.');
+          return;
+        }
+
+        // Первый вызов синтеза выполняется непосредственно при нажатии.
+        clearSpeech();
+        const unlock = utterance(' ');
+        unlock.volume = 0;
+        speech.speak(unlock);
+
+        state.reading = true;
+        state.run++;
+        state.lastSpoken = '';
+        resetCandidate();
+        recognized.textContent = placeholder;
+        readButton.textContent = 'Остановить озвучку';
+        readButton.classList.add('stop');
+        status('Запускаю распознавание…');
+        scan();
       });
-      document.addEventListener('visibilitychange',()=>{ if(document.hidden && state.reading){ state.reading=false; clearTimeout(state.timer); speechSynthesis?.cancel(); readButton.textContent='Начать распознавание'; readButton.classList.remove('stop'); sayStatus('Safari приостановил работу страницы. Вернитесь и нажмите «Начать распознавание».'); } });
-      window.addEventListener('pagehide',()=>{ clearTimeout(state.timer); if(state.stream) state.stream.getTracks().forEach(track=>track.stop()); speechSynthesis?.cancel(); });
-      if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && state.reading) {
+          stopReading('Озвучка приостановлена. Для продолжения нажмите «Начать озвучку».');
+        }
+      });
+
+      window.addEventListener('pagehide', () => closeCamera('Камера выключена.'));
+
+      if ('serviceWorker' in navigator && location.protocol === 'https:') {
+        navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+      }
     })();
   </script>
 </body>
