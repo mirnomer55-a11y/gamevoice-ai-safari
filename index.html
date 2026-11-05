@@ -226,6 +226,18 @@
         if(state.reading) { state.reading=false; clearTimeout(state.timer); speechSynthesis?.cancel(); readButton.textContent='Начать распознавание'; readButton.classList.remove('stop'); sayStatus('Распознавание остановлено.'); return; }
         if(!state.stream) return;
         if(!window.speechSynthesis) { sayStatus('Синтез речи в этом браузере недоступен.'); return; }
+        // iPhone Safari only allows speech synthesis after a direct user gesture.
+        // Unlock it synchronously here, before the OCR engine's asynchronous download.
+        try {
+          speechSynthesis.cancel();
+          const unlock = new SpeechSynthesisUtterance(' ');
+          unlock.lang = 'ru-RU';
+          unlock.volume = 0;
+          unlock.rate = 10;
+          const selectedVoice = state.voices.find(v => v.voiceURI === voiceSelect.value);
+          if (selectedVoice) unlock.voice = selectedVoice;
+          speechSynthesis.speak(unlock);
+        } catch {}
         state.reading=true; state.candidate=''; state.candidateCount=0; state.lastSpoken=''; state.lastText=''; recognized.textContent='Здесь появятся субтитры';
         readButton.textContent='Остановить озвучку'; readButton.classList.add('stop');
         try { await getWorker(); scan(); }
