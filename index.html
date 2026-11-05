@@ -66,6 +66,7 @@
       <aside class="controls">
         <button class="primary" id="startCamera">Включить камеру</button>
         <button class="primary" id="toggleReading" disabled>Начать распознавание</button>
+        <button class="secondary" id="testVoice">Проверить голос</button>
         <div class="status" id="status" role="status">Поверните iPhone горизонтально и разрешите Safari доступ к камере.</div>
         <div>
           <label for="voice">Русский голос</label>
@@ -96,6 +97,7 @@
       const video = $('video'), overlay = $('overlay'), selection = $('selection');
       const statusEl = $('status'), recognized = $('recognized');
       const cameraButton = $('startCamera'), readButton = $('toggleReading');
+      const testVoiceButton = $('testVoice');
       const voiceSelect = $('voice'), speedSelect = $('speed');
       const state = { stream:null, worker:null, reading:false, busy:false, timer:0, rect:{x:.12,y:.69,w:.76,h:.23}, mode:'', start:null, initial:null, voices:[], candidate:'', candidateCount:0, lastSpoken:'', blankAt:0, lastText:'' };
       const sayStatus = value => { statusEl.textContent = value; };
@@ -158,6 +160,18 @@
       }
       if(window.speechSynthesis) { loadVoices(); speechSynthesis.addEventListener('voiceschanged',loadVoices); }
       voiceSelect.addEventListener('change',()=>localStorage.setItem('gva.voice',voiceSelect.value));
+      testVoiceButton.addEventListener('click',()=>{
+        if(!window.speechSynthesis) { sayStatus('Синтез речи в этом браузере недоступен.'); return; }
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance('Проверка русского голоса.');
+        utterance.lang = 'ru-RU';
+        utterance.voice = state.voices.find(v => v.voiceURI === voiceSelect.value) || null;
+        utterance.rate = Number(speedSelect.value) || 1;
+        utterance.onstart = () => sayStatus('Проверяю выбранный голос…');
+        utterance.onend = () => sayStatus('Голос работает. Можно начинать распознавание.');
+        utterance.onerror = event => sayStatus('Safari не запустил голос: ' + (event.error || 'неизвестная ошибка') + '. Проверьте звук iPhone и выбранный голос.');
+        speechSynthesis.speak(utterance);
+      });
       speedSelect.addEventListener('change',()=>localStorage.setItem('gva.speed',speedSelect.value));
       speedSelect.value=localStorage.getItem('gva.speed')||'1';
 
@@ -240,6 +254,7 @@
         } catch {}
         state.reading=true; state.candidate=''; state.candidateCount=0; state.lastSpoken=''; state.lastText=''; recognized.textContent='Здесь появятся субтитры';
         readButton.textContent='Остановить озвучку'; readButton.classList.add('stop');
+        sayStatus('Запускаю распознавание и озвучку…');
         try { await getWorker(); scan(); }
         catch(error) { state.reading=false; readButton.textContent='Начать распознавание'; readButton.classList.remove('stop'); sayStatus(error.message||'Не удалось запустить OCR.'); }
       });

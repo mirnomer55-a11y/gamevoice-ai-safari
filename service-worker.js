@@ -1,4 +1,4 @@
-const CACHE = 'gamevoice-safari-v2';
+const CACHE = 'gamevoice-safari-v3';
 const APP_FILES = ['./', './index.html', './manifest.webmanifest'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_FILES)).then(() => self.skipWaiting()));
