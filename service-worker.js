@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'gamevoice-safari-v4';
+const CACHE = 'gamevoice-safari-v6';
 const APP_FILES = ['./', './index.html', './manifest.webmanifest'];
 const INDEX_URL = new URL('./index.html', self.registration.scope).href;
 
@@ -39,7 +39,6 @@ self.addEventListener('fetch', event => {
       try {
         const response = await fetch(request, { cache: 'no-cache' });
         if (!response.ok) return response;
-
         if (response.headers.get('content-type')?.includes('text/html')) {
           const cache = await caches.open(CACHE);
           await cache.put(INDEX_URL, response.clone());
