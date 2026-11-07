@@ -235,6 +235,8 @@
         </div>
 
         <div>
+          <span class="field-title">Текст из рамки</span>
+          <div class="recognized" id="rawText">Пока текст не распознан</div>
           <span class="field-title">Последняя реплика для озвучки</span>
           <div class="recognized" id="recognized">Здесь появятся субтитры</div>
         </div>
@@ -264,6 +266,7 @@
       const selection = byId('selection');
       const statusEl = byId('status');
       const recognized = byId('recognized');
+      const rawText = byId('rawText');
       const cameraButton = byId('startCamera');
       const readButton = byId('toggleReading');
       const voiceSelect = byId('voice');
@@ -632,7 +635,7 @@
         const plausible = words.some(word => word.length >= 3) ||
                           (words.length === 1 && words[0].length === 2 && confidence >= 80);
 
-        if (!plausible || confidence < 35) {
+        if (!plausible || confidence < 20) {
           state.candidate = '';
           state.candidateCount = 0;
           if (state.blankAt === null) state.blankAt = now;
@@ -671,8 +674,12 @@
           if (!isCurrent(run) || rectVersion !== state.rectVersion) return;
 
           const text = (result.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 600);
-          maybeSpeak(text, Number(result.data.confidence) || 0);
-          if (isCurrent(run)) status('Ищу субтитры в выделенной рамке…');
+          const confidence = Number(result.data.confidence) || 0;
+          rawText.textContent = text || 'В рамке пока нет распознанного текста';
+          maybeSpeak(text, confidence);
+          if (isCurrent(run)) status(text
+            ? 'Распознала текст в рамке. Проверяю, что это реплика субтитров…'
+            : 'Жду субтитры в выделенной рамке…');
         } catch (error) {
           if (isCurrent(run)) stopReading('Ошибка распознавания. ' + error.message);
         } finally {
@@ -706,6 +713,7 @@
         state.lastSpoken = '';
         resetCandidate();
         recognized.textContent = placeholder;
+        rawText.textContent = 'Распознавание началось…';
         readButton.textContent = 'Остановить озвучку';
         readButton.classList.add('stop');
         status('Запускаю распознавание…');
@@ -727,3 +735,4 @@
   </script>
 </body>
 </html>
+
