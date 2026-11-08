@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101012">
+<title>GameVoice — тест нейросетевого голоса</title>
+<style>
+:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;background:#101012;color:#f5f5f7}main{max-width:850px;margin:auto;padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(30px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left))}h1{font-size:25px;margin:0 0 10px}h2{font-size:19px;margin:0 0 12px}p{line-height:1.5;color:#b5b5c0}section{background:#1c1c22;padding:18px;border-radius:16px;margin:16px 0}button,select,textarea{font:inherit;color:inherit;font-size:16px}button,select{border:1px solid #41414c;border-radius:12px;padding:12px;background:#282830}button{cursor:pointer;min-height:48px}button:disabled{opacity:.4;cursor:default}.primary{background:#6872ff;border-color:#6872ff;font-weight:700}.buttons{display:flex;gap:10px;flex-wrap:wrap}.buttons>button{flex:1 1 200px}textarea{width:100%;min-height:140px;border:1px solid #41414c;border-radius:12px;padding:12px;background:#111116;line-height:1.5;margin:10px 0}label{display:block;margin:12px 0 6px}.fields{display:flex;gap:16px;flex-wrap:wrap}.fields>div{flex:1;min-width:180px}select{width:100%}.status{line-height:1.5;margin:12px 0;white-space:pre-line;overflow-wrap:anywhere}.small{font-size:13px;color:#a6a6b4}output{display:block;line-height:1.6;white-space:pre-line}progress{width:100%;height:14px;margin-top:14px}a{color:#a7afff}dl{margin:10px 0 0}dl>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;padding:13px 0;border-bottom:1px solid #383840}dt{color:#b5b5c0}dd{margin:0;font-variant-numeric:tabular-nums}summary{cursor:pointer;color:#b5b5c0;margin:12px 0}details p{margin:8px 0}#cancel{background:#6a2931}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>GameVoice — нейросетевой голос</h1>
+<p>Dmitri · русский мужской голос Piper · тест 1.0.0.<br>Отдельная проверка без камеры и OCR.</p>
+<section>
+<h2>1. Подготовка</h2>
+<button class="primary" id="prepare">Подготовить голос</button>
+<progress id="progress" value="0" max="1" hidden></progress>
+<div class="status" id="status" role="status">Файлы займут около 95 МБ. При первой подготовке сохраните их через Wi-Fi. В дальнейшем синтез работает на телефоне.</div>
+<p class="small" id="network"></p>
+<p class="small">Для проверки без интернета отключите Wi-Fi и мобильные данные, перезагрузите страницу и снова нажмите «Подготовить голос».</p>
+</section>
+<section>
+<h2>2. Звучание</h2>
+<div class="fields">
+<div><label for="preset">Текст</label><select id="preset"><option value="dialogue">Диалог</option><option value="normal">Обычная реплика</option><option value="long">Длинная реплика</option></select></div>
+<div><label for="rate">Скорость</label><select id="rate"><option value="0.5">0,5×</option><option value="1" selected>1,0×</option><option value="1.5">1,5×</option></select></div>
+</div>
+<label for="text">Можно ввести свой текст — до 240 символов</label>
+<textarea id="text" maxlength="240">Ты слышишь меня? Нам нужно уходить, пока стража не вернулась. Подожди… Я кое-что заметил у двери. Кажется, здесь есть другой путь!</textarea>
+<div class="buttons">
+<button class="primary" id="speak" disabled>Произнести голосом Dmitri</button>
+<button id="system">Сравнить с системным голосом</button>
+<button id="stop">Остановить звук</button>
+</div>
+<p><output id="measurements">Здесь появятся результаты прослушивания.</output></p>
+<p class="small">«До запуска аудио» — время от нажатия до запланированного запуска звука в браузере. Оно не измеряет дополнительную задержку динамика или Bluetooth-колонки.</p>
+</section>
+<section>
+<h2>3. Скорость</h2>
+<div class="buttons">
+<button class="primary" id="benchmark" disabled>Измерить скорость Dmitri</button>
+<button id="export" disabled>Сохранить результаты</button>
+<button id="cancel" hidden>Прервать вычисление</button>
+</div>
+<p class="small">Измерение всегда проходит на 1,0×: новый запуск движка, первая обычная реплика, пять повторов обычной и пять повторов длинной. Звук в этом тесте не воспроизводится. Оставьте страницу открытой.</p>
+<dl aria-label="Результаты измерений">
+<div><dt>Подготовка из сохранённых файлов</dt><dd id="initResult">—</dd></div>
+<div><dt>Первая реплика, 42 символа</dt><dd id="firstResult">—</dd></div>
+<div><dt>Повторная реплика, медиана</dt><dd id="normalResult">—</dd></div>
+<div><dt>Длинная реплика, 106 символов</dt><dd id="longResult">—</dd></div>
+</dl>
+<details><summary>Как читать результаты</summary>
+<p class="small">Измеряется подготовка полного звука реплики, включая преобразование текста в произношение. Скачивание файлов и воспроизведение не входят в время синтеза.</p>
+<p class="small">Продолжительность готовой речи — отдельная величина: например, синтез может занять 0,6 секунды, а произношение — 3 секунды. Быстрый синтез сам по себе не предотвращает очередь длинных реплик.</p>
+<p class="small">Для системного голоса измеряется событие начала речи. Это другой показатель: напрямую приравнивать его к времени получения полного звука Dmitri нельзя.</p>
+</details>
+</section>
+<p class="small">Это эксперимент, а не обновление основной версии GameVoice. Файлы голоса находятся в этой папке сайта; текст не отправляется на сервер. После подготовки новые реплики синтезируются без загрузок. Очистка данных сайта может удалить сохранённый комплект. <a href="./THIRD_PARTY.txt">Источники и лицензии</a>.</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const VERSION = '1.0.0';
+  const CACHE = 'gamevoice-neural-lab-v1';
+  const $ = id => document.getElementById(id);
+  const phrases = [
+    'Сейчас здесь находится сувенирный магазин.',
+    'Мы должны добраться до замка до наступления темноты. Возьми карту и проверь, какой дорогой нам лучше идти.'
+  ];
+  const dialogue = 'Ты слышишь меня? Нам нужно уходить, пока стража не вернулась. Подожди… Я кое-что заметил у двери. Кажется, здесь есть другой путь!';
+  const ms = value => Math.round(value) + ' мс';
+  const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const status = text => { $('status').textContent = text; };
+  let bridge = null;
+  let ready = false;
+  let busy = false;
+  let cancelable = false;
+  let operation = 0;
+  let playback = 0;
+  let audioContext = null;
+  let audioSource = null;
+  let systemPhrase = null;
+  let report = null;
+
+  function updateButtons() {
+    $('prepare').disabled = busy;
+    $('speak').disabled = busy || !ready;
+    $('benchmark').disabled = busy || !ready;
+    $('system').disabled = busy;
+    $('export').disabled = busy || !report;
+    $('preset').disabled = busy;
+    $('rate').disabled = busy;
+    $('text').disabled = busy;
+    $('cancel').hidden = !cancelable;
+  }
+  function network() {
+    $('network').textContent = navigator.onLine
+      ? 'Устройство сообщает: сеть доступна.'
+      : 'Устройство сообщает: соединения с сетью нет.';
+  }
+  network();
+  window.addEventListener('online', network);
+  window.addEventListener('offline', network);
+  $('preset').addEventListener('change', () => {
+    $('text').value = { normal: phrases[0], long: phrases[1], dialogue }[$('preset').value];
+  });
+
+  class VoiceWorker {
+    constructor() {
+      this.worker = new Worker('./worker.mjs', { type: 'module' });
+      this.jobs = new Map();
+      this.nextID = 0;
+      this.closed = false;
+      this.worker.onmessage = event => {
+        const data = event.data;
+        const job = this.jobs.get(data.id);
+        if (!job) return;
+        clearTimeout(job.timer); this.jobs.delete(data.id);
+        if (data.ok) job.resolve(data);
+        else job.reject(new Error(data.error || 'Ошибка синтеза.'));
+      };
+      this.worker.onerror = event => {
+        event.preventDefault();
+        this.close(new Error(event.message || 'Safari не смог запустить движок.'));
+      };
+    }
+    request(data) {
+      if (this.closed) return Promise.reject(new Error('Движок остановлен. Повторите подготовку.'));
+      const id = ++this.nextID;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => this.close(new Error('Движок не ответил за 45 секунд. Для игры такая задержка не подходит.')), 45000);
+        this.jobs.set(id, { resolve, reject, timer });
+        this.worker.postMessage({ id, ...data });
+      });
+    }
+    close(error = new Error('Вычисление прервано.')) {
+      if (this.closed) return;
+      this.closed = true;
+      this.worker.terminate();
+      for (const job of this.jobs.values()) { clearTimeout(job.timer); job.reject(error); }
+      this.jobs.clear();
+    }
+  }
+
+  async function initializeWorker() {
+    ready = false;
+    bridge?.close();
+    const start = performance.now();
+    bridge = new VoiceWorker();
+    const info = await bridge.request({ type: 'init' });
+    if (info.voice !== 'Dmitri') throw new Error('Не найден нейросетевой голос Dmitri.');
+    ready = true;
+    return { ...info, initializationMs: performance.now() - start };
+  }
+
+  async function waitForController(expected) {
+    if (navigator.serviceWorker.controller?.scriptURL === expected) return;
+    await new Promise((resolve, reject) => {
+      const changed = () => {
+        if (navigator.serviceWorker.controller?.scriptURL !== expected) return;
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener('controllerchange', changed);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        navigator.serviceWorker.removeEventListener('controllerchange', changed);
+        reject(new Error('Перезагрузите страницу и повторите подготовку.'));
+      }, 15000);
+      navigator.serviceWorker.addEventListener('controllerchange', changed);
+      changed();
+    });
+  }
+
+  async function installFiles() {
+    if (!window.isSecureContext || !('serviceWorker' in navigator) || !('caches' in window)) {
+      throw new Error('Откройте страницу по HTTPS в Safari. Из приложения «Файлы» тест не запускается.');
+    }
+    const target = new URL('./service-worker.js', location.href).href;
+    const registration = await navigator.serviceWorker.getRegistration(new URL('./', location.href).href);
+    if (registration?.active?.scriptURL !== target) {
+      await navigator.serviceWorker.register(target, { updateViaCache: 'none' });
+    }
+    await waitForController(target);
+    const response = await fetch('./manifest.json');
+    if (!response.ok) throw new Error('Не найден manifest.json. Загрузите всю папку neural-lab.');
+    const manifest = await response.json();
+    if (manifest.version !== VERSION || !Array.isArray(manifest.files)) {
+      throw new Error('Смешаны разные версии теста. Обновите целиком папку neural-lab.');
+    }
+    const cache = await caches.open(CACHE);
+    const digest = async data => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
+      .map(value => value.toString(16).padStart(2, '0')).join('');
+    let savedBytes = 0;
+    $('progress').hidden = false;
+    $('progress').max = manifest.bytes;
+    for (const file of manifest.files) {
+      if (!/^[a-zA-Z0-9_./-]+$/.test(file.path) || file.path.startsWith('/') || file.path.split('/').includes('..')) {
+        throw new Error('Некорректный список файлов теста.');
+      }
+      const url = new URL(file.path, location.href).href;
+      let cached = await cache.match(url);
+      let data = cached ? await cached.arrayBuffer() : null;
+      const verified = data && data.byteLength === file.bytes && await digest(data) === file.sha256;
+      if (!verified) {
+        await cache.delete(url);
+        const downloaded = await fetch(url, { cache: 'reload' });
+        if (!downloaded.ok) throw new Error('Не удалось получить ' + file.path + '. Проверьте загрузку папки в GitHub.');
+        data = await downloaded.arrayBuffer();
+        if (data.byteLength !== file.bytes || await digest(data) !== file.sha256) {
+          throw new Error('Файл не совпадает с комплектом: ' + file.path);
+        }
+        await cache.put(url, new Response(data, { headers: { 'Content-Type': file.type } }));
+      }
+      savedBytes += file.bytes;
+      $('progress').value = savedBytes;
+      status('Сохраняю и проверяю файлы: ' + Math.round(savedBytes / 1000000) + ' из ' + Math.ceil(manifest.bytes / 1000000) + ' МБ.');
+    }
+    await cache.put(new URL('./manifest.json', location.href).href,
+      new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } }));
+    $('progress').hidden = true;
+    return manifest;
+  }
+
+  function stopAudio() {
+    playback++;
+    if (audioSource) { try { audioSource.stop(); } catch {} audioSource = null; }
+    systemPhrase = null;
+    window.speechSynthesis?.cancel();
+  }
+  function unlockAudio() {
+    if (!audioContext || audioContext.state === 'closed') {
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+      const Audio = window.AudioContext || window.webkitAudioContext;
+      if (!Audio) throw new Error('Браузер не предоставляет Web Audio.');
+      audioContext = new Audio({ latencyHint: 'interactive' });
+    }
+    // Invoked synchronously by the user's tap, before any await.
+    return audioContext.resume();
+  }
+  function play(result) {
+    const pcm = new Float32Array(result.pcm);
+    const buffer = audioContext.createBuffer(1, pcm.length, result.sampleRate);
+    buffer.copyToChannel(pcm, 0);
+    const node = audioContext.createBufferSource();
+    node.buffer = buffer;
+    node.connect(audioContext.destination);
+    node.onended = () => { if (audioSource === node) audioSource = null; node.disconnect(); };
+    audioSource = node;
+    node.start(audioContext.currentTime + 0.02);
+    return 20;
+  }
+  function cancelCalculation(message) {
+    operation++;
+    stopAudio();
+    bridge?.close(); bridge = null;
+    ready = false; busy = false; cancelable = false;
+    status(message + ' Нажмите «Подготовить голос» для нового запуска.');
+    updateButtons();
+  }
+
+  $('prepare').addEventListener('click', async () => {
+    if (busy) return;
+    const token = ++operation;
+    busy = true; cancelable = false; stopAudio(); updateButtons();
+    try {
+      await installFiles();
+      if (token !== operation) return;
+      status('Файлы сохранены. Запускаю нейросетевой движок…');
+      cancelable = true; updateButtons();
+      const info = await initializeWorker();
+      if (token !== operation) return;
+      status('Dmitri готов. Подготовка из сохранённых файлов: ' + ms(info.initializationMs) + '.\nПроверьте звучание и выполните измерение скорости.');
+    } catch (error) {
+      if (token !== operation) return;
+      ready = false; bridge?.close(); bridge = null;
+      status(error.message);
+    } finally {
+      if (token === operation) { busy = false; cancelable = false; $('progress').hidden = true; updateButtons(); }
+    }
+  });
+
+  $('speak').addEventListener('click', async () => {
+    if (busy || !ready) return;
+    const text = $('text').value.trim();
+    if (!text || text.length > 240) { status('Введите от 1 до 240 символов.'); return; }
+    const start = performance.now();
+    let unlocked;
+    try { unlocked = unlockAudio(); } catch (error) { status(error.message); return; }
+    stopAudio();
+    const soundToken = playback;
+    const token = ++operation;
+    busy = true; cancelable = true; updateButtons();
+    status('Готовлю речь локально…');
+    try {
+      await unlocked;
+      if (audioContext.state !== 'running') throw new Error('Safari не включил звук. Повторите нажатие и проверьте громкость.');
+      const result = await bridge.request({ type: 'synthesize', text, rate: Number($('rate').value) });
+      if (token !== operation) return;
+      if (soundToken !== playback) { status('Озвучивание отменено. Голос остаётся готов к работе.'); return; }
+      const lead = play(result);
+      $('measurements').textContent = 'Синтез полного звука: ' + ms(result.readyMs) +
+        '\nДо запуска аудио: ' + ms(performance.now() - start + lead) +
+        '\nПродолжительность речи: ' + result.duration.toFixed(2) + ' с';
+      status('Реплика подготовлена и передана на воспроизведение.');
+    } catch (error) {
+      if (token !== operation) return;
+      ready = false; bridge?.close(); bridge = null;
+      status(error.message + ' Повторите подготовку.');
+    } finally {
+      if (token === operation) { busy = false; cancelable = false; updateButtons(); }
+    }
+  });
+
+  $('stop').addEventListener('click', stopAudio);
+  $('cancel').addEventListener('click', () => cancelCalculation('Вычисление прервано.'));
+  $('system').addEventListener('click', () => {
+    const synth = window.speechSynthesis;
+    if (!synth) { status('Системная озвучка недоступна в этом браузере.'); return; }
+    const text = $('text').value.trim();
+    if (!text) { status('Введите текст.'); return; }
+    const voices = synth.getVoices().filter(voice => /^ru(?:[-_]|$)/i.test(voice.lang));
+    const voice = voices.find(item => /milena|милена/i.test(item.name)) || voices[0];
+    if (!voice) { status('Русский системный голос ещё не доступен. Повторите нажатие после загрузки списка голосов.'); return; }
+    stopAudio();
+    const token = playback;
+    const phrase = new SpeechSynthesisUtterance(text);
+    phrase.voice = voice; phrase.lang = voice.lang;
+    phrase.rate = Number($('rate').value); phrase.volume = 1;
+    const start = performance.now();
+    phrase.onstart = () => {
+      if (token !== playback) return;
+      $('measurements').textContent = 'Системный голос: ' + voice.name + '\nСобытие начала речи: ' + ms(performance.now() - start) + '.\nЭто не замер полного синтеза Dmitri.';
+    };
+    phrase.onerror = event => {
+      if (token === playback) status('Системная озвучка: ' + event.error + '. Проверьте громкость и повторите нажатие.');
+    };
+    phrase.onend = () => { if (systemPhrase === phrase) systemPhrase = null; };
+    systemPhrase = phrase;
+    synth.speak(phrase);
+  });
+  window.speechSynthesis?.getVoices();
+
+  function cleanResult(result, text) {
+    return {
+      text, synthesisMs: result.synthesisMs, readyMs: result.readyMs,
+      phonemeMs: result.phonemeMs, inferenceMs: result.inferenceMs,
+      duration: result.duration, realTimeFactor: result.realTimeFactor,
+      assetReadsDuringSynthesis: result.assetReadsDuringSynthesis
+    };
+  }
+  $('benchmark').addEventListener('click', async () => {
+    if (busy || !ready) return;
+    const token = ++operation;
+    busy = true; cancelable = true; stopAudio(); updateButtons();
+    report = null;
+    for (const id of ['initResult', 'firstResult', 'normalResult', 'longResult']) $(id).textContent = '—';
+    try {
+      status('Измерение: новый запуск движка из сохранённых файлов…');
+      const info = await initializeWorker();
+      if (token !== operation) return;
+      $('initResult').textContent = ms(info.initializationMs);
+      status('Измерение первой реплики…');
+      const first = await bridge.request({ type: 'synthesize', text: phrases[0], rate: 1 });
+      if (token !== operation) return;
+      $('firstResult').textContent = ms(first.readyMs);
+      const normal = [], long = [];
+      for (const [group, text, name] of [[normal, phrases[0], 'обычная'], [long, phrases[1], 'длинная']]) {
+        for (let repeat = 1; repeat <= 5; repeat++) {
+          status('Измерение: ' + name + ' реплика, ' + repeat + ' из 5…');
+          const result = await bridge.request({ type: 'synthesize', text, rate: 1 });
+          if (token !== operation) return;
+          if (result.assetReadsDuringSynthesis !== 0) throw new Error('Во время синтеза выполнялась загрузка файлов.');
+          group.push(cleanResult(result, text));
+        }
+        $(group === normal ? 'normalResult' : 'longResult').textContent = ms(median(group.map(item => item.readyMs)));
+      }
+      report = {
+        created: new Date().toISOString(), testVersion: VERSION,
+        userAgent: navigator.userAgent, offlineReported: !navigator.onLine,
+        cameraAndOCR: false, rate: 1, phrases,
+        voice: 'Dmitri', engine: info.engine, wasmThreads: info.threads,
+        initializationMs: info.initializationMs,
+        firstMs: first.readyMs, firstDuration: first.duration,
+        normalMedianMs: median(normal.map(item => item.readyMs)),
+        longMedianMs: median(long.map(item => item.readyMs)),
+        first: cleanResult(first, phrases[0]), normal, long
+      };
+      status('Измерение завершено. Сохраните результаты и отправьте файл в чат.');
+    } catch (error) {
+      if (token !== operation) return;
+      ready = false; bridge?.close(); bridge = null;
+      status(error.message + ' Повторите подготовку.');
+    } finally {
+      if (token === operation) { busy = false; cancelable = false; updateButtons(); }
+    }
+  });
+
+  $('export').addEventListener('click', () => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = 'gamevoice-dmitri-test.json';
+    document.body.append(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopAudio();
+      if (cancelable) cancelCalculation('Тест прерван: страница была свёрнута.');
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    operation++; stopAudio(); bridge?.close();
+    bridge = null; ready = false; busy = false; cancelable = false;
+  });
+  window.addEventListener('pageshow', updateButtons);
+  updateButtons();
+})();
+</script>
+</body>
+</html>
