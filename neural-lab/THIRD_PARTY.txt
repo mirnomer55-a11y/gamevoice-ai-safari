@@ -1,0 +1,47 @@
+GameVoice Neural Voice Test 1.0.0 — sources and notices
+
+Voice: ru_RU-dmitri-medium (Russian, one male speaker, 22050 Hz).
+Source: https://huggingface.co/rhasspy/piper-voices
+Pinned revision: e7229f7d33a10e145e109b886d661984201ac3c4
+Model SHA-256: f073356ebc4bd0f80c5af58df2953a5988bd5bdab1eb38635ce960b071fbefcb
+Original model: ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx
+The original file is divided into eight byte-for-byte parts for browser upload
+to GitHub. It is joined before session creation, without changing model weights.
+The repository declares MIT; the per-voice model card declares CC0 for its
+training dataset. See sources/DMITRI_MODEL_CARD.txt and sources/PIPER-MIT.txt.
+
+Inference: ONNX Runtime Web 1.24.3, MIT.
+Source: https://github.com/microsoft/onnxruntime/tree/v1.24.3
+Distributed files were downloaded from the pinned npm distribution:
+https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/
+The delivered test reads its local copies only, not that CDN.
+See sources/ONNXRUNTIME-MIT.txt and sources/ONNXRUNTIME-ThirdPartyNotices.txt.
+
+Pronunciation: @diffusionstudio/piper-wasm 1.0.0, precompiled distribution.
+Package source: https://github.com/diffusion-studio/piper-wasm
+Build procedure: sources/PHONEMIZER-BUILD.md.
+Original npm archive integrity (SHA-512, base64):
+4Hgh7wJ1PuGEVgVi1CpducESnyXwjFRJN4zXjYRpxgquM+Zh6Eqq8ZaiGpCKm4yXvT1Y2SPQXbv0dEckFD9NaQ==
+The package declares MIT. It embeds eSpeak NG pronunciation code/data, which
+retain GPLv3 terms; see sources/ESPEAK-GPL3.txt.
+Corresponding source projects:
+https://github.com/wide-video/piper-phonemize/tree/wide.video
+https://github.com/rhasspy/espeak-ng
+https://github.com/wide-video/piper-wasm
+The adapter appends a single global factory export to piper_phonemize.js.
+The WASM binary and .data file are otherwise unchanged. A fresh CLI instance
+is used per utterance while the compiled WASM module and data stay in memory.
+
+Pipeline reference: https://github.com/diffusionstudio/vits-web
+This test does not call that package's predict() or recreate an ONNX session
+per utterance. One inference session remains loaded for the Worker lifetime.
+
+All application source for this test is included in index.html, worker.mjs,
+service-worker.js and sources/. The GameVoice test code is available under
+GPLv3-or-later; the individual bundled components retain their own licenses.
+License text: sources/ESPEAK-GPL3.txt.
+
+No API keys, accounts, inference server, or microphone are used by this test.
+Initial preparation stores about 95 MB in CacheStorage. No asset fetches are
+performed by synthesize() after initialization. The separate optional system
+voice comparison uses the browser's speechSynthesis API, not the Piper model.
