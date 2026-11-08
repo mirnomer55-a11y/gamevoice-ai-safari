@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101012">
+<title>GameVoice — отдельный тест голосов</title>
+<style>
+:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;background:#101012;color:#f5f5f7}main{max-width:900px;margin:auto;padding:max(20px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(30px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left))}h1{font-size:25px;margin:0 0 12px}p{line-height:1.5;color:#b5b5c0}section{background:#1c1c22;padding:18px;border-radius:16px;margin:16px 0}button,select,textarea{font:inherit;color:inherit}button,select{border:1px solid #41414c;border-radius:12px;padding:12px;background:#282830}button{cursor:pointer;min-height:48px}button:disabled{opacity:.4;cursor:default}.primary{background:#6872ff;border-color:#6872ff;font-weight:700}.buttons{display:flex;gap:10px;flex-wrap:wrap}textarea{width:100%;min-height:110px;border:1px solid #41414c;border-radius:12px;padding:12px;background:#111116;line-height:1.5;margin:10px 0}label{display:block;margin:12px 0 6px}.fields{display:flex;gap:16px;flex-wrap:wrap}.fields>div{flex:1;min-width:180px}select{width:100%}.status{line-height:1.5;margin:12px 0;white-space:pre-line}.small{font-size:13px;color:#a6a6b4}.table-wrap{overflow:auto}table{border-collapse:collapse;min-width:620px;width:100%;font-size:14px}th,td{padding:12px 8px;border-bottom:1px solid #3a3a45;text-align:left}th{color:#b5b5c0;font-weight:500}output{display:block;line-height:1.6;white-space:pre-line}progress{width:100%;height:12px}a{color:#a7afff}
+</style>
+</head>
+<body>
+<main>
+<h1>GameVoice — тест локальных голосов</h1>
+<p>Анна и Александр · RHVoice / WebAssembly. Отдельная проверка без камеры и распознавания.</p>
+<section>
+<button class="primary" id="prepare">Подготовить для работы без интернета</button>
+<progress id="progress" value="0" max="1" hidden></progress>
+<div class="status" id="status" role="status">Нажмите «Подготовить». Файлы будут сохранены в браузере один раз.</div>
+<p class="small" id="network"></p>
+<p class="small">После подготовки отключите Wi-Fi и мобильный интернет, перезагрузите эту страницу и нажмите «Подготовить» ещё раз. Файлы откроются из сохранённой копии.</p>
+</section>
+<section>
+<div class="fields">
+<div><label for="voice">Голос</label><select id="voice"><option value="Anna">Анна — женский</option><option value="Aleksandr">Александр — мужской</option></select></div>
+<div><label for="rate">Скорость</label><select id="rate"><option value="0.5">0,5×</option><option value="1" selected>1,0×</option><option value="1.5">1,5×</option></select></div>
+</div>
+<label for="text">Текст для проверки</label>
+<textarea id="text" maxlength="400">Сейчас здесь находится сувенирный магазин.</textarea>
+<div class="buttons">
+<button class="primary" id="speak" disabled>Произнести локальным голосом</button>
+<button id="system">Сравнить с системным голосом</button>
+<button id="stop">Остановить звук</button>
+</div>
+<p><output id="measurements">Здесь появятся время синтеза и время до запуска аудио.</output></p>
+<p class="small">«До запуска аудио» включает передачу звука из движка в аудиосистему браузера. Дополнительная задержка Bluetooth-колонки в этот показатель не входит.</p>
+</section>
+<section>
+<div class="buttons"><button class="primary" id="benchmark" disabled>Измерить оба голоса</button><button id="export" disabled>Сохранить результаты</button></div>
+<p class="small">Автотест использует скорость 1,0×. Для каждого голоса движок запускается заново. Затем выполняются пять повторов обычной и пять повторов длинной реплики. Таблица показывает медиану повторов.</p>
+<div class="table-wrap"><table><thead><tr><th>Голос</th><th>Подготовка из кэша</th><th>Первая реплика</th><th>Повторная реплика</th><th>Длинная реплика</th></tr></thead><tbody id="results"><tr><td colspan="5">Ожидание теста</td></tr></tbody></table></div>
+<p class="small">Обычная реплика — 42 символов. Длинная — 106 символов. Здесь измеряется получение полного звука, без скачивания и без его воспроизведения.</p>
+</section>
+<p class="small">Синтез выполняется на этом устройстве. После подготовки для генерации речи не используются сетевые запросы. Браузер может удалить сохранённые файлы при очистке данных сайта. <a href="./THIRD_PARTY.txt">Исходники и лицензии</a>.</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const CACHE = 'gamevoice-voice-lab-v1';
+  const phrases = [
+    'Сейчас здесь находится сувенирный магазин.',
+    'Мы должны добраться до замка до наступления темноты. Возьми карту и проверь, какой дорогой нам лучше идти.'
+  ];
+  let bridge = null;
+  let ready = false;
+  let busy = false;
+  let context = null;
+  let source = null;
+  let systemPhrase = null;
+  let finalReport = null;
+  let lastInitializationMs = null;
+  const status = text => { $('status').textContent = text; };
+  const milliseconds = value => Math.round(value) + ' мс';
+  const median = values => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+  function updateButtons() {
+    $('prepare').disabled = busy;
+    $('speak').disabled = busy || !ready;
+    $('benchmark').disabled = busy || !ready;
+    $('system').disabled = busy;
+    $('export').disabled = busy || !finalReport;
+  }
+  function network() {
+    $('network').textContent = navigator.onLine
+      ? 'Система сообщает, что сеть доступна.'
+      : 'Система сообщает, что устройство без сети.';
+  }
+  network();
+  window.addEventListener('online', network);
+  window.addEventListener('offline', network);
+
+  class VoiceWorker {
+    constructor() {
+      this.worker = new Worker('./worker.mjs', { type: 'module' });
+      this.nextID = 0;
+      this.jobs = new Map();
+      this.worker.onmessage = event => {
+        const data = event.data;
+        const job = this.jobs.get(data.id);
+        if (!job) return;
+        this.jobs.delete(data.id);
+        clearTimeout(job.timer);
+        if (data.ok) job.resolve(data);
+        else job.reject(new Error(data.error));
+      };
+      this.worker.onerror = event => this.close(new Error(event.message || 'Ошибка Worker.'));
+    }
+    request(message) {
+      const id = ++this.nextID;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => this.close(new Error('Движок не ответил за 30 секунд.')), 30000);
+        this.jobs.set(id, { resolve, reject, timer });
+        this.worker.postMessage({ id, ...message });
+      });
+    }
+    close(error = new Error('Движок остановлен.')) {
+      this.worker.terminate();
+      for (const job of this.jobs.values()) {
+        clearTimeout(job.timer);
+        job.reject(error);
+      }
+      this.jobs.clear();
+    }
+  }
+
+  async function initializeWorker() {
+    ready = false;
+    bridge?.close();
+    const start = performance.now();
+    bridge = new VoiceWorker();
+    const result = await bridge.request({ type: 'init' });
+    lastInitializationMs = performance.now() - start;
+    if (!result.voices.includes('Anna') || !result.voices.includes('Aleksandr')) {
+      throw new Error('Не найдены оба русских голоса.');
+    }
+    ready = true;
+    return lastInitializationMs;
+  }
+
+  async function cacheFiles() {
+    if (!('serviceWorker' in navigator) || !window.isSecureContext) {
+      throw new Error('Откройте тест по HTTPS в Safari или Chrome.');
+    }
+    const targetWorker = new URL('./service-worker.js', location.href).href;
+    const existing = await navigator.serviceWorker.getRegistration(new URL('./', location.href).href);
+    if (existing?.active?.scriptURL !== targetWorker) {
+      await navigator.serviceWorker.register(targetWorker, { updateViaCache: 'none' });
+    }
+    if (navigator.serviceWorker.controller?.scriptURL !== targetWorker) {
+      await new Promise((resolve, reject) => {
+        const changed = () => {
+          if (navigator.serviceWorker.controller?.scriptURL !== targetWorker) return;
+          clearTimeout(timer);
+          navigator.serviceWorker.removeEventListener('controllerchange', changed);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          navigator.serviceWorker.removeEventListener('controllerchange', changed);
+          reject(new Error('Обновите страницу и повторите подготовку.'));
+        }, 15000);
+        navigator.serviceWorker.addEventListener('controllerchange', changed);
+        changed();
+      });
+    }
+    const response = await fetch('./manifest.json');
+    if (!response.ok) throw new Error('Не найден manifest.json. Загрузите всю папку voice-lab.');
+    const manifest = await response.json();
+    const cache = await caches.open(CACHE);
+    let done = 0;
+    $('progress').hidden = false;
+    $('progress').max = manifest.files.length;
+    for (const file of manifest.files) {
+      const url = new URL(file.path, location.href);
+      let saved = await cache.match(url.href);
+      let data = saved ? await saved.arrayBuffer() : null;
+      const digest = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+        .map(n => n.toString(16).padStart(2, '0')).join('');
+      if (!data || await digest(data) !== file.sha256) {
+        await cache.delete(url.href);
+        saved = await fetch(url.href);
+        if (!saved.ok) throw new Error('Не удалось скачать ' + file.path);
+        data = await saved.arrayBuffer();
+        if (await digest(data) !== file.sha256) throw new Error('Файл повреждён: ' + file.path);
+        await cache.put(url.href, new Response(data, { headers: { 'Content-Type': file.type } }));
+      }
+      done++;
+      $('progress').value = done;
+      status('Подготавливаю файлы: ' + done + ' из ' + manifest.files.length + '.');
+    }
+    await cache.put(new URL('./manifest.json', location.href).href,
+      new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } }));
+    $('progress').hidden = true;
+    return manifest;
+  }
+
+  function stopAudio() {
+    if (source) { try { source.stop(); } catch {} source = null; }
+    systemPhrase = null;
+    window.speechSynthesis?.cancel();
+  }
+  function audio() {
+    if (!context || context.state === 'closed') {
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+      const Audio = window.AudioContext || window.webkitAudioContext;
+      if (!Audio) throw new Error('Web Audio недоступно.');
+      context = new Audio({ latencyHint: 'interactive' });
+    }
+    return context.resume();
+  }
+  function play(result) {
+    const pcm = new Int16Array(result.pcm);
+    const buffer = context.createBuffer(1, pcm.length, result.sampleRate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
+    const next = context.createBufferSource();
+    next.buffer = buffer;
+    next.connect(context.destination);
+    next.onended = () => { if (source === next) source = null; next.disconnect(); };
+    source = next;
+    const lead = 0.02;
+    next.start(context.currentTime + lead);
+    return lead * 1000;
+  }
+
+  $('prepare').addEventListener('click', async () => {
+    if (busy) return;
+    busy = true; updateButtons();
+    stopAudio();
+    try {
+      await cacheFiles();
+      status('Файлы сохранены. Запускаю движок…');
+      await initializeWorker();
+      status('Оба голоса готовы. Подготовка из сохранённых файлов: ' + milliseconds(lastInitializationMs) + '.\nМожно отключить интернет и проверить озвучку.');
+    } catch (error) {
+      ready = false; bridge?.close(); bridge = null;
+      status(error.message);
+    } finally { busy = false; updateButtons(); }
+  });
+
+  $('speak').addEventListener('click', async () => {
+    if (busy || !ready) return;
+    const text = $('text').value.trim();
+    if (!text) { status('Введите текст.'); return; }
+    const start = performance.now();
+    let unlocked;
+    try { unlocked = audio(); } catch (error) { status(error.message); return; }
+    stopAudio(); busy = true; updateButtons();
+    try {
+      await unlocked;
+      if (context.state !== 'running') throw new Error('Safari не включил аудио. Повторите нажатие и проверьте громкость.');
+      const result = await bridge.request({ type: 'synthesize', text, voice: $('voice').value, rate: Number($('rate').value) });
+      const lead = play(result);
+      const delay = performance.now() - start + lead;
+      $('measurements').textContent = 'Синтез: ' + milliseconds(result.synthesisMs) +
+        '\nДо запуска аудио: ' + milliseconds(delay) +
+        '\nДлительность речи: ' + result.duration.toFixed(2) + ' с';
+      status('Речь подготовлена локально. Сетевые запросы для синтеза не выполнялись.');
+    } catch (error) { ready = false; status(error.message + ' Повторите подготовку.'); }
+    finally { busy = false; updateButtons(); }
+  });
+
+  $('stop').addEventListener('click', stopAudio);
+  $('system').addEventListener('click', () => {
+    const synth = window.speechSynthesis;
+    if (!synth) { status('Системная озвучка браузером не предоставлена.'); return; }
+    stopAudio();
+    const phrase = new SpeechSynthesisUtterance($('text').value.trim());
+    const voices = synth.getVoices().filter(v => /^ru([-_]|$)/i.test(v.lang));
+    const voice = voices.find(v => /милена|milena/i.test(v.name)) || voices[0];
+    if (voice) phrase.voice = voice;
+    phrase.lang = 'ru-RU'; phrase.rate = Number($('rate').value); systemPhrase = phrase;
+    const start = performance.now();
+    phrase.onstart = () => {
+      if (systemPhrase === phrase) $('measurements').textContent = 'Системный голос: ' + (voice?.name || 'по умолчанию') +
+        '\nСобытие начала речи: ' + milliseconds(performance.now() - start) +
+        '\nЭто другой способ измерения, чем запуск аудиобуфера локального движка.';
+    };
+    phrase.onerror = event => { if (systemPhrase === phrase) status('Ошибка системного голоса: ' + event.error); };
+    if (synth.paused) synth.resume();
+    synth.speak(phrase);
+  });
+
+  $('benchmark').addEventListener('click', async () => {
+    if (busy || !ready) return;
+    busy = true; updateButtons(); stopAudio();
+    finalReport = { created: new Date().toISOString(), userAgent: navigator.userAgent, offlineReported: !navigator.onLine, rate: 1, phrases, voices: [] };
+    $('results').replaceChildren();
+    try {
+      for (const voice of ['Anna', 'Aleksandr']) {
+        status('Измеряю голос ' + (voice === 'Anna' ? 'Анна' : 'Александр') + '…');
+        const initializationMs = await initializeWorker();
+        const first = await bridge.request({ type: 'synthesize', text: phrases[0], voice, rate: 1 });
+        const runs = [];
+        for (const text of phrases) {
+          for (let i = 0; i < 5; i++) {
+            const result = await bridge.request({ type: 'synthesize', text, voice, rate: 1 });
+            runs.push({ text, synthesisMs: result.synthesisMs, readyMs: result.readyMs, duration: result.duration });
+          }
+        }
+        const normal = median(runs.filter(r => r.text === phrases[0]).map(r => r.readyMs));
+        const long = median(runs.filter(r => r.text === phrases[1]).map(r => r.readyMs));
+        finalReport.voices.push({ voice, initializationMs, firstMs: first.readyMs, firstDuration: first.duration, normalMedianMs: normal, longMedianMs: long, runs });
+        const row = document.createElement('tr');
+        for (const value of [voice === 'Anna' ? 'Анна' : 'Александр', milliseconds(initializationMs), milliseconds(first.readyMs), milliseconds(normal), milliseconds(long)]) {
+          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+        }
+        $('results').append(row);
+      }
+      status('Измерения завершены. Сохраните результаты или сделайте снимок таблицы.');
+    } catch (error) { ready = false; status(error.message + ' Повторите подготовку.'); }
+    finally { busy = false; updateButtons(); }
+  });
+  $('export').addEventListener('click', () => {
+    if (!finalReport) return;
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(new Blob([JSON.stringify(finalReport, null, 2)], { type: 'application/json' }));
+    link.href = url; link.download = 'gamevoice-voice-test.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopAudio(); });
+  updateButtons();
+})();
+</script>
+</body>
+</html>

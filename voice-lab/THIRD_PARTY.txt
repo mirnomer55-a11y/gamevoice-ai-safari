@@ -1,0 +1,34 @@
+GameVoice — отдельный тест локальных голосов, версия 1.
+
+Движок: RHVoice, Olga Yakovleva и участники RHVoice.
+https://github.com/RHVoice/RHVoice
+https://rhvoice.org/
+
+WebAssembly-сборка и исходный C++ адаптер:
+https://github.com/accessibility-luxembourg/rhvoice-emscripten-lb
+https://accessibility-luxembourg.github.io/rhvoice-emscripten-lb/dist/
+Адаптер C++ и скрипты сборки сохранены в sources/.
+Модуль WebAssembly скопирован без изменений. Контрольные суммы — в manifest.json.
+Лицензия адаптера: MIT, полный текст в sources/LICENSE_WRAPPER.txt.
+Условия RHVoice и зависимостей: sources/RHVOICE-LICENSE-NOTES.md и исходный репозиторий.
+Исходники всего движка: https://github.com/RHVoice/RHVoice
+Исходники сборки и инструкции для пересборки: https://github.com/accessibility-luxembourg/rhvoice-emscripten-lb
+Заменяемый бинарный файл находится в assets/rhvoice.wasm.
+
+Русский язык:
+https://github.com/RHVoice/Russian
+Голоса:
+https://github.com/RHVoice/anna-rus
+https://github.com/RHVoice/aleksandr-rus
+Официальная страница: https://rhvoice.org/ru-voices/
+
+В пакетах использованы исходные файлы русского языка и модели голосов 16000 Гц.
+Содержимое файлов не изменено. Для загрузки они упакованы в gzip-контейнер.
+Из пакетов голосов исключены неиспользуемые моделью вспомогательные файлы.
+Голоса Anna и Aleksandr поставляются в RHVoice под CC BY-SA 4.0.
+Полный текст лицензии: sources/CC-BY-SA-4.0.txt.
+
+Файлы интерфейса, worker.mjs и контейнеры данных подготовлены для отдельного
+исследования скорости GameVoice. Результат не является проверкой готовности
+движка для коммерческого релиза. Исходники адаптера и условия лицензий
+прилагаются для сохранения возможности дальнейшего изучения и пересборки.

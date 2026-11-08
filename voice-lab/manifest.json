@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "index.html",
+      "sha256": "363d2063db69053d4220c3c23a2e2ed078b3c36d9302e763514dc79e787421a5",
+      "bytes": 18771,
+      "type": "text/html; charset=utf-8"
+    },
+    {
+      "path": "worker.mjs",
+      "sha256": "8f60e86cc6b99fbfb06572642dce2caf98c1ed4436efc7abf9a6d510d287c6f4",
+      "bytes": 4702,
+      "type": "application/javascript"
+    },
+    {
+      "path": "THIRD_PARTY.txt",
+      "sha256": "2df176217c008961bbc9e65f055a8fe56e0973d926deca6bcddac2c97cef2871",
+      "bytes": 2517,
+      "type": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "sources/CC-BY-SA-4.0.txt",
+      "sha256": "3b2890eacd851373001c4a14623458e3adaf1b1967939aa9c38a318e28d61c00",
+      "bytes": 20138,
+      "type": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "sources/LICENSE_WRAPPER.txt",
+      "sha256": "fede5ee57bf343e6f58e36ab760ce979d94d783a5afdc71f25fca413fd25f734",
+      "bytes": 1086,
+      "type": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "sources/RHVOICE-LICENSE-NOTES.md",
+      "sha256": "adb78d0ae36c0edfc2844cc3e8b43bc46b810e9079e2fa5b6bd7344ac8e563f0",
+      "bytes": 2665,
+      "type": "text/plain; charset=utf-8"
+    },
+    {
+      "path": "assets/aleksandr.pack",
+      "sha256": "4676c1fbc852cdd8d2058262dee3581ce1e132989a94663f054e3b8670ab7754",
+      "bytes": 1625136,
+      "type": "application/octet-stream"
+    },
+    {
+      "path": "assets/anna.pack",
+      "sha256": "046830cf1e5a959e17adb1ad42108971cc866df97feb16348c63af40002ac4bf",
+      "bytes": 1448485,
+      "type": "application/octet-stream"
+    },
+    {
+      "path": "assets/rhvoice.mjs",
+      "sha256": "3e5e5fbffddf9f19acd64754a1232e0fd08b25630d411e2ae1c6e28be6657714",
+      "bytes": 87051,
+      "type": "application/javascript"
+    },
+    {
+      "path": "assets/rhvoice.wasm",
+      "sha256": "d9327debda9c9e3e1540190df46e843261235a15a4ae7209e1b6853cfe847ab6",
+      "bytes": 1786892,
+      "type": "application/wasm"
+    },
+    {
+      "path": "assets/russian.pack",
+      "sha256": "3e69869a7978cb9aa53a5e9543c21a48f9aa41339baf41ecab203e60d8d271df",
+      "bytes": 1541059,
+      "type": "application/octet-stream"
+    }
+  ]
+}
