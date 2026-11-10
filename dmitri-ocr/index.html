@@ -228,7 +228,7 @@
   <main class="app">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Тест Dmitri + OCR · 0.6.1</span>
+      <span class="tag">Тест Dmitri + OCR · 0.6.2</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -322,7 +322,8 @@
   ></script>
 
   <script type="module">
-    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.1';
+    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.2';
+    import { SubtitleFilter } from './subtitle-filter.mjs?v=0.6.2';
     (() => {
       'use strict';
 
@@ -342,7 +343,7 @@
       const speech = window.speechSynthesis;
       const LOCAL_VOICE = 'local:dmitri';
       const isLocal = () => voiceSelect.value === LOCAL_VOICE;
-      const measurements = { version: '0.6.1', started: new Date().toISOString(), ocrFrames: 0, samples: [], completions: [] };
+      const measurements = { version: '0.6.2', started: new Date().toISOString(), ocrFrames: 0, samples: [], completions: [] };
       let lastOCR = null;
       let preparingVoice = false;
       function recordMeasurement(sample) {
@@ -468,6 +469,7 @@
         return row[b.length] <= limit;
       }
 
+      const subtitleFilter = new SubtitleFilter();
       const gate = {
         candidate: '',
         count: 0,
@@ -490,13 +492,6 @@
               this.blankAt = performance.now();
             }
 
-            if (
-              performance.now() - this.blankAt > 2500 &&
-              !speaker.current
-            ) {
-              this.spoken = '';
-            }
-
             if (performance.now() - this.blankAt > 1000) {
               speaker.pending = null;
             }
@@ -510,7 +505,10 @@
           this.count = similar(next, this.candidate) ? this.count + 1 : 1;
           this.candidate = next;
 
-          if (similar(next, this.spoken)) return '';
+          if (subtitleFilter.wasSpoken(result.text)) {
+            subtitleFilter.metrics.duplicateFrames++;
+            return '';
+          }
           if (result.confidence < 72 && this.count < 2) return '';
 
           return result.text;
@@ -549,6 +547,8 @@
         enqueue(text) {
           const normalized = key(text);
 
+          if (subtitleFilter.wasSpoken(text)) return;
+
           if (similar(normalized, this.current?.key)) return;
 
           if (this.current) {
@@ -556,10 +556,11 @@
             return;
           }
 
-          this.say(text, false);
+          this.say(text, false, true);
         },
 
-        say(text, announcement) {
+        say(text, announcement, automatic = false) {
+          if (automatic && subtitleFilter.wasSpoken(text)) return;
           if (!speech) {
             speechStatus('Этот браузер не поддерживает озвучку.');
             return;
@@ -602,6 +603,7 @@
 
             if (!announcement) {
               gate.spoken = key(text);
+              subtitleFilter.remember(text);
               recognized.textContent = text;
             }
 
@@ -627,7 +629,7 @@
               next &&
               performance.now() - next.time < 3000
             ) {
-              this.say(next.text, false);
+              this.say(next.text, false, true);
             }
           };
 
@@ -651,6 +653,7 @@
 
       const neural = new NeuralSpeaker({
         key, similar,
+        canStart: text => !subtitleFilter.wasSpoken(text),
         getRate: () => Number(speedSelect.value) || 1,
         isReading: () => state.reading,
         beforePrepare: ensureServiceWorker,
@@ -668,6 +671,7 @@
             ' мс · от готового текста до аудио ' + Math.round(sample.afterRecognitionMs) + ' мс');
           if (!announcement) {
             gate.spoken = key(text);
+            subtitleFilter.remember(text);
             recognized.textContent = text;
           }
           recordMeasurement({ ...sample, cameraAndOCR: state.reading,
@@ -720,6 +724,7 @@
           userAgent: navigator.userAgent, offlineReported: !navigator.onLine,
           cameraAndOCR: true, voice: isLocal() ? 'Dmitri' : voiceSelect.value,
           rate: Number(speedSelect.value), queue: { ...neural.metrics },
+          filters: { ...subtitleFilter.metrics },
           note: 'Audio times are scheduling estimates, not physical speaker/Bluetooth latency. No camera images are included.'
         };
         const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -808,6 +813,8 @@
       function closeCamera(message) {
         state.cameraTicket++;
         stopReading(message);
+        frameColours = null;
+        colourPixels = null;
 
         const stream = state.stream;
         state.stream = null;
@@ -1150,8 +1157,11 @@
 
       const sourceCanvas = document.createElement('canvas');
       const ocrCanvas = document.createElement('canvas');
+      let frameColours = null;
+      let colourPixels = null;
 
       function prepareFrame() {
+        frameColours = null;
         const box = video.getBoundingClientRect();
         const videoWidth = video.videoWidth;
         const videoHeight = video.videoHeight;
@@ -1212,7 +1222,12 @@
           0, 0, sourceCanvas.width, sourceCanvas.height
         );
 
-        if (processing.value === 'original') return sourceCanvas;
+        if (processing.value === 'original') {
+          const image = context.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+          frameColours = { data: image.data, width: image.width, height: image.height,
+            mode: 'original', offsetX: 0, offsetY: 0 };
+          return sourceCanvas;
+        }
 
         const image = context.getImageData(
           0, 0, sourceCanvas.width, sourceCanvas.height
@@ -1238,6 +1253,12 @@
           }
         }
 
+        // Preserve colour locally before converting the same frame to OCR ink.
+        // Reuse one buffer so repeated camera frames do not accumulate copies.
+        if (!colourPixels || colourPixels.length !== pixels.length) colourPixels = new Uint8ClampedArray(pixels.length);
+        colourPixels.set(pixels);
+        frameColours = { data: colourPixels, width: sourceCanvas.width, height: sourceCanvas.height,
+          mode: 'light', threshold, offsetX: 0, offsetY: 0 };
         const rows = new Uint32Array(sourceCanvas.height);
 
         for (let i = 0; i < pixels.length; i += 4) {
@@ -1305,6 +1326,8 @@
 
         ocrCanvas.width = sourceCanvas.width + 24;
         ocrCanvas.height = bottom - top + 24;
+        frameColours.offsetX = -12;
+        frameColours.offsetY = top - 12;
 
         const output = ocrCanvas.getContext('2d');
         output.fillStyle = 'white';
@@ -1361,8 +1384,10 @@
           0
         );
 
+        const filtered = subtitleFilter.sanitize(valid, frameColours);
         return {
-          text: clean(valid.map(line => line.text).join(' ')),
+          ...filtered,
+          text: clean(filtered.text),
           confidence: length
             ? valid.reduce(
                 (sum, line) =>
@@ -1428,6 +1453,8 @@
             'В рамке пока нет распознанного текста';
 
           const result = readResult(data);
+          frameColours = null;
+          if (result.blocked) speaker.pending = null;
           lastOCR = { ocrMs: performance.now() - start, ocrStartedAt: start };
           measurements.ocrFrames++;
           speaker.observe(result.text);
@@ -1452,6 +1479,8 @@
               'Субтитры найдены · OCR ' +
               Math.round(performance.now() - start) + ' мс'
             );
+          } else if (result.blocked === 'symbols') {
+            status('Пропускаю реплику с мусорными символами.');
           } else if (clean(data.text)) {
             status(
               'Текст пока не похож на субтитры. ' +
@@ -1466,6 +1495,7 @@
             discardWorker();
           }
         } finally {
+          frameColours = null;
           state.busy = false;
 
           if (state.reading) {
@@ -1544,4 +1574,5 @@
   </script>
 </body>
 </html>
+
 

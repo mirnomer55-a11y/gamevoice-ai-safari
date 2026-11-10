@@ -195,6 +195,7 @@ export class NeuralSpeaker {
     if (!this.options.isReading()) return;
     text = normalize(text);
     if (!text) return;
+    if (this.options.canStart && !this.options.canStart(text)) return;
     const key = this.options.key(text);
     if (this.options.similar(key, this.current?.key)) return;
     if (this.current) {
@@ -224,6 +225,9 @@ export class NeuralSpeaker {
   }
   freshPending() { return this.pending && now() - this.pending.time < 3000; }
   begin(text, announcement, manual, metadata, queued = null) {
+    if (!manual && this.options.canStart && !this.options.canStart(text)) {
+      this.options.onStatus('Dmitri готов'); return;
+    }
     if (!this.ready || this.bridge?.closed) {
       this.ready = false;
       this.options.onError('Сначала нажмите «Подготовить Dmitri».'); return;
@@ -358,4 +362,5 @@ export class NeuralSpeaker {
     } else this.options.onStatus('Dmitri готов');
   }
 }
+
 
