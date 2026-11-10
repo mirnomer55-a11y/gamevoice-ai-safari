@@ -1,12 +1,16 @@
 'use strict';
-const CACHE = 'gamevoice-dmitri-ocr-v1';
+const CACHE = 'gamevoice-dmitri-ocr-v2';
 const VOICE_CACHE = 'gamevoice-neural-lab-v1';
 const HOME = new URL('./', self.registration.scope);
 const LAB = new URL('../neural-lab/', HOME);
 const INDEX = new URL('index.html', HOME).href;
 self.addEventListener('install', event => event.waitUntil((async () => {
   const cache = await caches.open(CACHE);
-  await cache.addAll([INDEX, new URL('neural-speaker.mjs', HOME).href]);
+  await cache.addAll([
+    INDEX,
+    new URL('neural-speaker.mjs?v=0.6.1', HOME).href,
+    new URL('synthesis-worker.mjs?v=0.6.1', HOME).href
+  ].map(url => new Request(url, { cache: 'reload' })));
   await self.skipWaiting();
 })()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
@@ -44,3 +48,4 @@ self.addEventListener('fetch', event => {
     return await cache.match(url.href) || fetch(request);
   })());
 });
+

@@ -43,8 +43,8 @@ export async function prepareVoiceFiles(progress = () => {}) {
   }));
 }
 
-// Keep natural sentence boundaries; split unusually long sentences at a pause
-// or word boundary. Worker input is limited to 240 characters per request.
+// Start with a small complete group of words; prepare the rest during playback.
+// Never combine separate sentences into a single model input.
 export function speechChunks(text) {
   const input = normalize(text);
   if (!input) return [];
@@ -52,39 +52,49 @@ export function speechChunks(text) {
     ? [...new Intl.Segmenter('ru', { granularity: 'sentence' }).segment(input)].map(x => x.segment.trim())
     : (input.match(/[^.!?…]+(?:[.!?…]+[»”"']*|$)|[.!?…]+/gu) || [input]);
   const chunks = [];
-  let collected = '';
   for (let sentence of sentences) {
     sentence = normalize(sentence);
     while (sentence) {
-      const limit = chunks.length ? 96 : 64;
-      if (collected && (collected + ' ' + sentence).length <= limit) {
-        collected += ' ' + sentence; sentence = ''; continue;
-      }
-      if (collected) { chunks.push(collected); collected = ''; continue; }
-      if (sentence.length <= limit) { collected = sentence; sentence = ''; continue; }
+      // Preserve the intonation of short standalone sentences. A long caption
+      // gets a shorter opening, then a modest second chunk that can be ready
+      // before the short opening finishes playing.
+      const limit = chunks.length === 0 ? (sentence.length <= 48 ? 48 : 36)
+        : chunks.length === 1 ? 64 : 100;
+      if (sentence.length <= limit) { chunks.push(sentence); break; }
       let end = -1;
       for (const punctuation of [',', ';', ':']) {
         const index = sentence.lastIndexOf(punctuation, limit - 1);
-        if (index >= limit / 2) end = Math.max(end, index + 1);
+        if (index >= limit / 2 && /\s/.test(sentence[index + 1] || '')) end = Math.max(end, index + 1);
       }
       if (end < 0) end = sentence.lastIndexOf(' ', limit);
       if (end < 1) {
-        // Keep an unusually long word intact when it still fits the engine.
+        // An oversized OCR token is rejected, never sliced into fake words.
         const nextSpace = sentence.indexOf(' ');
-        end = nextSpace > 0 && nextSpace <= 240 ? nextSpace : Math.min(sentence.length, 240);
-        if (/^[\uDC00-\uDFFF]$/.test(sentence[end])) end--;
+        end = nextSpace > 0 ? nextSpace : sentence.length;
+        if (end > 238) throw new Error('В тексте найдено слишком длинное слово. Проверьте распознавание.');
+      } else {
+        // Keep a preposition/conjunction with the following word when possible.
+        const lastWord = sentence.slice(0, end).match(/(?:^|\s)([^\s]+)$/u)?.[1];
+        if (/^(?:и|а|но|в|во|на|к|ко|с|со|из|от|у|о|об|по|за|для|до|не|ни|без)$/iu.test(lastWord || '')) {
+          const previous = sentence.lastIndexOf(' ', end - lastWord.length - 1);
+          if (previous >= limit / 2) end = previous;
+        }
       }
       chunks.push(sentence.slice(0, end).trim());
       sentence = sentence.slice(end).trim();
     }
   }
-  if (collected) chunks.push(collected);
   return chunks.filter(Boolean);
+}
+
+export function synthesisText(chunk, last) {
+  // Give the last word a proper phonetic ending even at an artificial boundary.
+  return /[.!?…,;:][»”"')\]]*$/u.test(chunk) ? chunk : chunk + (last ? '.' : ',');
 }
 
 class Bridge {
   constructor() {
-    this.worker = new Worker(new URL('worker.mjs', LAB), { type: 'module' });
+    this.worker = new Worker(new URL('./synthesis-worker.mjs?v=0.6.1', import.meta.url), { type: 'module' });
     this.jobs = new Map(); this.sequence = 0; this.closed = false;
     this.worker.onmessage = ({ data }) => {
       const job = this.jobs.get(data.id);
@@ -123,9 +133,10 @@ export class NeuralSpeaker {
     this.options = options;
     this.ready = false; this.loading = null; this.bridge = null;
     this.current = null; this.pending = null; this.generation = 0;
-    this.context = null; this.source = null; this.wake = null;
+    this.context = null; this.sources = new Map();
     this.unlocked = Promise.resolve(); this.serial = Promise.resolve();
-    this.metrics = { droppedBeforePlayback: 0, replacedPending: 0, played: 0 };
+    this.metrics = { droppedBeforePlayback: 0, replacedPending: 0, played: 0,
+      completed: 0, scheduledChunks: 0, preloadedPending: 0, playbackGapsMs: [] };
     this.blankAt = null;
   }
   async prepare() {
@@ -138,7 +149,6 @@ export class NeuralSpeaker {
       if (token !== this.generation) throw new Error('Подготовка отменена.');
       this.bridge?.close(); this.bridge = new Bridge();
       await this.bridge.request({ type: 'init' });
-      // Warm up before OCR is enabled. This PCM is deliberately not played.
       await this.bridge.request({ type: 'synthesize', text: 'Проверка.', rate: 1 });
       if (token !== this.generation) throw new Error('Подготовка отменена.');
       this.ready = true;
@@ -156,20 +166,18 @@ export class NeuralSpeaker {
       if (!Audio) throw new Error('Браузер не предоставляет Web Audio.');
       this.context = new Audio({ latencyHint: 'interactive' });
     }
-    // This function must be called synchronously from a click handler.
+    // Call synchronously from the original click to preserve Safari activation.
     this.unlocked = this.context.resume();
     this.unlocked.catch(() => {});
     return this.unlocked;
   }
   stop() {
     this.generation++; this.current = null; this.pending = null; this.blankAt = null;
-    if (this.source) {
-      const source = this.source; this.source = null;
+    for (const [source, finish] of [...this.sources]) {
       source.onended = null;
       try { source.stop(); } catch {}
-      source.disconnect();
+      finish();
     }
-    this.wake?.(); this.wake = null;
   }
   destroy() {
     this.stop(); this.bridge?.close(); this.bridge = null; this.ready = false;
@@ -178,10 +186,10 @@ export class NeuralSpeaker {
   observe(text) {
     if (text) { this.blankAt = null; return; }
     if (this.blankAt === null) this.blankAt = now();
-    if (now() - this.blankAt > 1000 && this.current && !this.current.manual) {
-      this.current.abandon = true;
-      this.pending = null;
-    }
+    if (now() - this.blankAt <= 1000) return;
+    this.pending = null;
+    // A vanished caption may be discarded only before its first sound.
+    if (this.current && !this.current.started && !this.current.manual) this.current.abandon = true;
   }
   enqueue(text, metadata = {}) {
     if (!this.options.isReading()) return;
@@ -190,8 +198,14 @@ export class NeuralSpeaker {
     const key = this.options.key(text);
     if (this.options.similar(key, this.current?.key)) return;
     if (this.current) {
-      if (this.pending && !this.options.similar(key, this.options.key(this.pending.text))) this.metrics.replacedPending++;
-      this.pending = { text, time: now(), metadata };
+      if (this.pending && this.options.similar(key, this.options.key(this.pending.text))) {
+        this.pending.time = now();
+        return;
+      }
+      if (this.pending) this.metrics.replacedPending++;
+      this.pending = { text, time: now(), acceptedAt: now(), metadata,
+        generation: this.generation, rate: this.options.getRate(), prepared: null };
+      this.prefetchPending();
       return;
     }
     this.begin(text, false, false, metadata);
@@ -204,17 +218,26 @@ export class NeuralSpeaker {
     return this.current === job && this.generation === job.generation &&
       (job.manual || this.options.isReading());
   }
-  begin(text, announcement, manual, metadata) {
+  outdated(job) {
+    // Once audible, finish ALL of this caption, not just its current fragment.
+    return !job.started && !job.manual && (job.abandon || this.freshPending());
+  }
+  freshPending() { return this.pending && now() - this.pending.time < 3000; }
+  begin(text, announcement, manual, metadata, queued = null) {
     if (!this.ready || this.bridge?.closed) {
       this.ready = false;
       this.options.onError('Сначала нажмите «Подготовить Dmitri».'); return;
     }
-    const chunks = speechChunks(text);
+    let chunks;
+    try { chunks = speechChunks(text); }
+    catch (error) { this.options.onError(error.message); return; }
     if (!chunks.length) return;
     const job = {
       text, key: announcement ? '' : this.options.key(text), chunks,
-      generation: this.generation, rate: this.options.getRate(),
-      manual, announcement, metadata, acceptedAt: now(), started: false, abandon: false
+      generation: this.generation, rate: queued?.rate ?? this.options.getRate(),
+      manual, announcement, metadata, acceptedAt: queued?.acceptedAt ?? now(),
+      started: false, abandon: false, finishing: false, nextAudioTime: 0, launchedAt: now(),
+      queued, playedChunks: 0, queueWaitMs: queued ? now() - queued.acceptedAt : 0
     };
     this.current = job;
     this.run(job).catch(error => {
@@ -224,80 +247,115 @@ export class NeuralSpeaker {
       this.options.onError(error.message);
     });
   }
-  generate(job, text) {
-    // No new job is sent while a cancelled synthesis is still running.
-    const promise = this.serial.then(async () => {
-      if (!this.valid(job) || job.abandon || this.freshPending(job)) return null;
-      return this.bridge.request({ type: 'synthesize', text, rate: job.rate });
-    });
+  serialize(work) {
+    const promise = this.serial.then(work);
     this.serial = promise.then(() => undefined, () => undefined);
     return promise;
   }
-  freshPending(job) {
-    return !job.manual && this.pending && now() - this.pending.time < 3000;
+  generate(job, index) {
+    return this.serialize(() => {
+      if (!this.valid(job) || this.outdated(job)) return null;
+      return this.bridge.request({ type: 'synthesize',
+        text: synthesisText(job.chunks[index], index === job.chunks.length - 1), rate: job.rate });
+    });
   }
-  async play(job, result, first) {
+  prefetchPending() {
+    const queued = this.pending;
+    if (!queued || queued.prepared || !this.current?.started || !this.current.finishing) return;
+    let chunks;
+    try { chunks = speechChunks(queued.text); } catch { return; }
+    if (!chunks.length) return;
+    queued.prepared = this.serialize(async () => {
+      if (this.generation !== queued.generation ||
+          (this.pending !== queued && this.current?.queued !== queued)) return null;
+      const result = await this.bridge.request({ type: 'synthesize',
+        text: synthesisText(chunks[0], chunks.length === 1), rate: queued.rate });
+      this.metrics.preloadedPending++;
+      return result;
+    });
+    // This promise may be deliberately discarded if a newer caption arrives.
+    queued.prepared.catch(() => {});
+  }
+  async schedule(job, result, index) {
     await this.unlocked;
-    if (!this.valid(job) || job.abandon || this.freshPending(job)) return false;
-    if (!job.started && !job.manual && now() - job.acceptedAt > 3500) {
-      return false;
-    }
+    if (!this.valid(job) || this.outdated(job)) return null;
+    if (!job.started && !job.manual && now() - job.launchedAt > 3500) return null;
     if (this.context?.state !== 'running') {
       throw new Error('Звук Safari приостановлен. Нажмите «Проверить голос» и начните озвучку снова.');
     }
     const pcm = new Float32Array(result.pcm);
     const buffer = this.context.createBuffer(1, pcm.length, result.sampleRate);
-    buffer.copyToChannel(pcm, 0);
+    buffer.copyToChannel(pcm, 0); // Keep the complete waveform, including word endings.
     const node = this.context.createBufferSource(); node.buffer = buffer;
-    node.connect(this.context.destination); this.source = node;
-    let finish;
-    const ended = new Promise(resolve => { finish = resolve; });
-    const watchdog = setTimeout(() => {
+    node.connect(this.context.destination);
+    const start = Math.max(this.context.currentTime + 0.015, job.nextAudioTime);
+    if (index > 0) {
+      this.metrics.playbackGapsMs.push(Math.round(Math.max(0, start - job.nextAudioTime) * 1000));
+      if (this.metrics.playbackGapsMs.length > 40) this.metrics.playbackGapsMs.shift();
+    }
+    job.nextAudioTime = start + buffer.duration;
+    let done, watchdog;
+    const ended = new Promise(resolve => { done = resolve; });
+    const finish = () => {
+      if (!this.sources.has(node)) return;
+      clearTimeout(watchdog); node.onended = null; node.disconnect();
+      this.sources.delete(node); done(this.valid(job));
+    };
+    this.sources.set(node, finish);
+    watchdog = setTimeout(() => {
       if (!this.valid(job)) { finish(); return; }
       this.stop();
       this.options.onError('Воспроизведение было прервано. Проверьте голос и повторите запуск.');
-      finish();
-    }, Math.max(15000, result.duration * 1000 + 5000));
-    this.wake = finish;
-    node.onended = () => finish();
-    node.start(this.context.currentTime + 0.015);
-    if (first) {
+    }, Math.max(15000, (job.nextAudioTime - this.context.currentTime) * 1000 + 5000));
+    node.onended = finish;
+    try { node.start(start); }
+    catch (error) { finish(); throw error; }
+    this.metrics.scheduledChunks++; job.playedChunks++;
+    if (index === 0) {
       job.started = true; this.metrics.played++;
       this.options.onStart(job.text, job.announcement, {
         ...job.metadata, voice: 'Dmitri', rate: job.rate,
         textLength: job.text.length, firstChunkLength: job.chunks[0].length,
         chunkCount: job.chunks.length, synthesisMs: result.readyMs,
-        afterRecognitionMs: now() - job.acceptedAt + 15,
+        afterRecognitionMs: now() - job.acceptedAt + (start - this.context.currentTime) * 1000,
+        queueWaitMs: job.queueWaitMs,
         assetReadsDuringSynthesis: result.assetReadsDuringSynthesis,
-        manual: job.manual
+        phonemeGroups: result.phonemeGroups ?? 1, manual: job.manual
       });
     }
-    await ended;
-    clearTimeout(watchdog);
-    node.onended = null; node.disconnect();
-    if (this.source === node) this.source = null;
-    if (this.wake === finish) this.wake = null;
-    return this.valid(job);
+    return { ended };
   }
   async run(job) {
     this.options.onStatus('Dmitri готовит реплику…');
-    let prepared = this.generate(job, job.chunks[0]);
+    let playing = null;
     for (let i = 0; i < job.chunks.length; i++) {
-      const result = await prepared;
-      if (!result || !this.valid(job) || job.abandon || this.freshPending(job)) break;
-      const playback = this.play(job, result, i === 0);
-      // At most one future sentence is synthesized while this one plays.
-      prepared = i + 1 < job.chunks.length ? this.generate(job, job.chunks[i + 1]) : null;
-      if (prepared) prepared.catch(() => {});
-      if (!await playback) break;
-      if (!this.valid(job) || job.abandon || this.freshPending(job)) break;
+      let result = i === 0 && job.queued?.prepared ? await job.queued.prepared : null;
+      if (!result) result = await this.generate(job, i);
+      if (!result || !this.valid(job) || this.outdated(job)) break;
+      const next = await this.schedule(job, result, i);
+      if (!next) break;
+      if (i === job.chunks.length - 1) {
+        job.finishing = true;
+        this.prefetchPending();
+      }
+      // Schedule the next buffer before the previous buffer ends, without overlap.
+      // At most two buffers are retained, and only one model request runs at once.
+      if (playing && !await playing.ended) return;
+      playing = next;
     }
+    if (playing && !await playing.ended) return;
     if (!this.valid(job)) return;
     if (!job.started) this.metrics.droppedBeforePlayback++;
+    else {
+      this.metrics.completed++;
+      this.options.onComplete?.({ chunkCount: job.chunks.length,
+        playedChunks: job.playedChunks, elapsedMs: now() - job.acceptedAt, manual: job.manual });
+    }
     this.current = null;
     const next = this.pending; this.pending = null;
     if (next && this.options.isReading() && now() - next.time < 3000) {
-      this.begin(next.text, false, false, next.metadata);
+      this.begin(next.text, false, false, next.metadata, next);
     } else this.options.onStatus('Dmitri готов');
   }
 }
+

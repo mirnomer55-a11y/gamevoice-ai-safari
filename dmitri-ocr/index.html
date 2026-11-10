@@ -228,7 +228,7 @@
   <main class="app">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Тест Dmitri + OCR · 0.6.0</span>
+      <span class="tag">Тест Dmitri + OCR · 0.6.1</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -322,7 +322,7 @@
   ></script>
 
   <script type="module">
-    import { NeuralSpeaker } from './neural-speaker.mjs';
+    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.1';
     (() => {
       'use strict';
 
@@ -342,7 +342,7 @@
       const speech = window.speechSynthesis;
       const LOCAL_VOICE = 'local:dmitri';
       const isLocal = () => voiceSelect.value === LOCAL_VOICE;
-      const measurements = { version: '0.6.0', started: new Date().toISOString(), ocrFrames: 0, samples: [] };
+      const measurements = { version: '0.6.1', started: new Date().toISOString(), ocrFrames: 0, samples: [], completions: [] };
       let lastOCR = null;
       let preparingVoice = false;
       function recordMeasurement(sample) {
@@ -672,6 +672,10 @@
           }
           recordMeasurement({ ...sample, cameraAndOCR: state.reading,
             fromOcrStartMs: sample.ocrStartedAt == null ? null : performance.now() - sample.ocrStartedAt });
+        },
+        onComplete: sample => {
+          measurements.completions.push({ ...sample, at: new Date().toISOString() });
+          if (measurements.completions.length > 100) measurements.completions.shift();
         },
         onError: message => {
           stopReading('Озвучка остановлена. Проверьте голос и повторите запуск.');
@@ -1540,3 +1544,4 @@
   </script>
 </body>
 </html>
+
