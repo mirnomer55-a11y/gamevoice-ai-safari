@@ -93,9 +93,9 @@ export function synthesisText(chunk, last) {
   return /[.!?…,;:][»”"')\]]*$/u.test(chunk) ? chunk : chunk + (last ? '.' : ',');
 }
 
-class Bridge {
+export class Bridge {
   constructor() {
-    this.worker = new Worker(new URL('./synthesis-worker.mjs?v=0.6.1', import.meta.url), { type: 'module' });
+    this.worker = new Worker(new URL('./synthesis-worker.mjs?v=0.6.5', import.meta.url), { type: 'module' });
     this.jobs = new Map(); this.sequence = 0; this.closed = false;
     this.worker.onmessage = ({ data }) => {
       const job = this.jobs.get(data.id);
@@ -103,22 +103,23 @@ class Bridge {
       clearTimeout(job.timer); this.jobs.delete(data.id);
       if (data.ok) job.resolve(data);
       else {
-        const error = new Error(data.error);
-        job.reject(error); this.close(error);
+        const error = Object.assign(new Error(data.error), { scope: data.scope || 'engine', code: data.code || 'worker-error' });
+        job.reject(error);
+        if (error.scope !== 'utterance') this.close(error);
       }
     };
     this.worker.onerror = event => {
       event.preventDefault();
-      this.close(new Error('Не удалось выполнить локальный синтез. Повторите подготовку Dmitri.'));
+      this.close(Object.assign(new Error('Не удалось выполнить локальный синтез.'), { scope:'engine',code:'worker-crash' }));
     };
   }
   request(message) {
     if (this.closed) return Promise.reject(new Error('Движок голоса остановлен.'));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.close(new Error('Dmitri не ответил за 20 секунд. Повторите подготовку голоса.')), 20000);
+      const timer = setTimeout(() => this.close(Object.assign(new Error('Dmitri не ответил за 20 секунд.'), { scope:'engine',code:'worker-timeout' })), 20000);
       this.jobs.set(id, { resolve, reject, timer });
-      this.worker.postMessage({ id, ...message });
+      try { this.worker.postMessage({ id, ...message }); } catch (error) { this.close(error); }
     });
   }
   close(error = new Error('Движок голоса закрыт.')) {
@@ -136,12 +137,24 @@ export class NeuralSpeaker {
     this.current = null; this.pending = null; this.generation = 0;
     this.context = null; this.sources = new Map();
     this.unlocked = Promise.resolve(); this.serial = Promise.resolve(); this.resuming = null;
+    this.sequence = 0; this.restarts = []; this.rejectedCaptionKey = ''; this.restarting = false;
     this.metrics = { droppedBeforePlayback: 0, replacedPending: 0, played: 0,
       completed: 0, scheduledChunks: 0, preloadedPending: 0, extendedCaptions: 0, appendedChunks: 0,
-      audioResumes: 0, playbackGapsMs: [] };
+      audioResumes: 0, chunkRetries: 0, engineRestarts: 0, failedCaptions: 0, recoveredEndEvents: 0, playbackGapsMs: [] };
     this.blankAt = null;
   }
   time() { return this.options.clock?.() ?? now(); }
+  makeBridge() { return this.options.createBridge?.() ?? new Bridge(); }
+  emit(type, details = {}) {
+    this.options.onEvent?.({ type, ...details, audioState: this.context?.state || 'none', atMs: this.time() });
+  }
+  snapshot() {
+    const job=this.current;
+    return { ready:this.ready,engineClosed:this.bridge?.closed??true,audioState:this.context?.state||'none',sources:this.sources.size,
+      current:job?{id:job.id,started:job.started,chunkCount:job.chunks.length,scheduledChunks:job.playedChunks,
+        generatingChunk:job.generatingChunk??null,ageMs:this.time()-job.acceptedAt,manual:job.manual}:null,
+      pending:this.pending?{textLength:this.pending.text.length,ageMs:this.time()-this.pending.time}:null };
+  }
   async prepare() {
     if (this.ready && !this.bridge?.closed) return;
     if (this.loading) return this.loading;
@@ -150,7 +163,7 @@ export class NeuralSpeaker {
       await this.options.beforePrepare();
       await prepareVoiceFiles(this.options.onProgress);
       if (token !== this.generation) throw new Error('Подготовка отменена.');
-      this.bridge?.close(); this.bridge = new Bridge();
+      this.bridge?.close(); this.bridge = this.makeBridge();
       await this.bridge.request({ type: 'init' });
       await this.bridge.request({ type: 'synthesize', text: 'Проверка.', rate: 1 });
       if (token !== this.generation) throw new Error('Подготовка отменена.');
@@ -168,6 +181,16 @@ export class NeuralSpeaker {
       const Audio = globalThis.AudioContext || globalThis.webkitAudioContext;
       if (!Audio) throw new Error('Браузер не предоставляет Web Audio.');
       this.context = new Audio({ latencyHint: 'interactive' });
+      const context=this.context;
+      context.addEventListener?.('statechange', () => {
+        this.emit('audio.state', { state:context.state });
+        const job=this.current;
+        if(context!==this.context || !job || !this.valid(job) || !this.options.isReading() ||
+          !['suspended','interrupted'].includes(context.state))return;
+        this.resumeAudio().catch(error=>{
+          if(this.valid(job))this.emit('audio.resume.failed',{jobId:job.id,message:error.message});
+        });
+      });
     }
     // Call synchronously from the original click to preserve Safari activation.
     this.unlocked = this.resumeAudio();
@@ -186,12 +209,17 @@ export class NeuralSpeaker {
     const attempt = Promise.race([request, deadline]).then(() => {
       if (this.context !== context || context.state !== 'running') throw new Error(message);
       this.metrics.audioResumes++;
+      this.emit('audio.resumed');
     }).finally(() => { clearTimeout(timer); if (this.resuming === attempt) this.resuming = null; });
     this.resuming = attempt;
     return attempt;
   }
-  stop() {
+  stop(reason = 'requested') {
+    if(this.current)this.options.onIncomplete?.({jobId:this.current.id,reason,chunkCount:this.current.chunks.length,
+      scheduledChunks:this.current.playedChunks,started:this.current.started,manual:this.current.manual});
+    this.emit('voice.stop',{reason,snapshot:this.snapshot()});
     this.generation++; this.current = null; this.pending = null; this.blankAt = null;
+    this.rejectedCaptionKey='';
     for (const [source, finish] of [...this.sources]) {
       source.onended = null;
       try { source.stop(); } catch {}
@@ -207,6 +235,7 @@ export class NeuralSpeaker {
     if (this.blankAt === null) this.blankAt = this.time();
     if (this.time() - this.blankAt <= 1000) return;
     this.pending = null;
+    this.rejectedCaptionKey='';
     // A vanished caption may be discarded only before its first sound.
     if (this.current && !this.current.started && !this.current.manual) this.current.abandon = true;
   }
@@ -217,6 +246,7 @@ export class NeuralSpeaker {
     if (this.extendCaption(text)) return;
     if (this.options.canStart && !this.options.canStart(text)) return;
     const key = this.options.key(text);
+    if(this.options.similar(key,this.rejectedCaptionKey))return;
     if (this.options.similar(key, this.current?.key)) return;
     if (this.current) {
       if (this.pending && this.options.similar(key, this.options.key(this.pending.text))) {
@@ -266,7 +296,7 @@ export class NeuralSpeaker {
     if (!manual && this.options.canStart && !this.options.canStart(text)) {
       this.options.onStatus('Dmitri готов'); return;
     }
-    if (!this.ready || this.bridge?.closed) {
+    if ((!this.ready && !this.restarting) || !this.bridge) {
       this.ready = false;
       this.options.onError('Сначала нажмите «Подготовить Dmitri».'); return;
     }
@@ -275,6 +305,7 @@ export class NeuralSpeaker {
     catch (error) { this.options.onError(error.message); return; }
     if (!chunks.length) return;
     const job = {
+      id:++this.sequence,
       text, key: announcement ? '' : this.options.key(text), chunks,
       generation: this.generation, rate: queued?.rate ?? this.options.getRate(),
       manual, announcement, metadata, acceptedAt: queued?.acceptedAt ?? this.time(),
@@ -285,12 +316,55 @@ export class NeuralSpeaker {
     // After minutes of silence Safari may suspend an otherwise prepared audio
     // context. Resume alongside synthesis, without reloading or warming a model.
     job.audioReady = this.resumeAudio(); job.audioReady.catch(() => {});
-    this.run(job).catch(error => {
+    this.run(job).catch(async error => {
       if (!this.valid(job)) return;
+      this.emit('caption.error',{jobId:job.id,scope:error.scope||'engine',code:error.code||'unknown',message:error.message,
+        chunkCount:job.chunks.length,scheduledChunks:job.playedChunks,generatingChunk:job.generatingChunk});
+      if(error.scope==='utterance' && !this.bridge?.closed){
+        this.metrics.failedCaptions++;this.rejectedCaptionKey=job.key;
+        if(job.lastEnded)await job.lastEnded;
+        if(!this.valid(job))return;
+        this.options.onIncomplete?.({jobId:job.id,reason:'utterance-error',chunkCount:job.chunks.length,scheduledChunks:job.playedChunks,started:job.started,manual:job.manual});
+        this.current=null;
+        this.options.onWarning?.('Не удалось озвучить фрагмент. Продолжаю следующие реплики.');
+        this.advance();return;
+      }
       if (this.bridge?.closed) this.ready = false;
-      this.stop();
+      this.stop(error.code||'voice-error');
       this.options.onError(error.message);
     });
+  }
+  async restartEngine(guard,error) {
+    if(!guard())return false;
+    const now=this.time();this.restarts=this.restarts.filter(t=>now-t<60000);
+    if(this.restarts.length>=2)throw Object.assign(new Error('Повторный сбой движка голоса. Нажмите «Подготовить Dmitri».'),{code:'restart-limit',scope:'engine'});
+    this.restarts.push(now);this.metrics.engineRestarts++;
+    this.emit('engine.restart',{code:error.code||'unknown',message:error.message});
+    this.options.onStatus('Восстанавливаю голос…');
+    this.bridge?.close();this.ready=false;this.restarting=true;
+    const generation=this.generation;
+    const bridge=this.makeBridge();this.bridge=bridge;
+    try{
+      await bridge.request({type:'init'});
+      if(this.generation!==generation || this.bridge!==bridge){bridge.close();return false;}
+      this.ready=true;this.emit('engine.ready');this.options.onReady?.();return guard();
+    }catch(error){bridge.close();throw error;}
+    finally{if(this.bridge===bridge)this.restarting=false;}
+  }
+  async requestSpeech(text,rate,guard,details) {
+    for(let attempt=0;attempt<2;attempt++){
+      if(!guard())return null;
+      try{return await this.bridge.request({type:'synthesize',text,rate});}
+      catch(error){
+        if(!guard())return null;
+        this.emit('chunk.error',{...details,attempt,code:error.code||'unknown',scope:error.scope||'engine',message:error.message});
+        if(attempt===1)throw error;
+        this.metrics.chunkRetries++;
+        if(error.scope==='utterance' && !this.bridge.closed)continue;
+        if(!await this.restartEngine(guard,error))return null;
+      }
+    }
+    return null;
   }
   serialize(work) {
     const promise = this.serial.then(work);
@@ -300,8 +374,9 @@ export class NeuralSpeaker {
   generate(job, index) {
     return this.serialize(() => {
       if (!this.valid(job) || this.outdated(job)) return null;
-      return this.bridge.request({ type: 'synthesize',
-        text: synthesisText(job.chunks[index], index === job.chunks.length - 1), rate: job.rate });
+      job.generatingChunk=index;
+      return this.requestSpeech(synthesisText(job.chunks[index], index===job.chunks.length-1),job.rate,
+        ()=>this.valid(job)&&!this.outdated(job),{jobId:job.id,chunk:index});
     });
   }
   prefetchPending() {
@@ -313,8 +388,8 @@ export class NeuralSpeaker {
     queued.prepared = this.serialize(async () => {
       if (this.generation !== queued.generation ||
           (this.pending !== queued && this.current?.queued !== queued)) return null;
-      const result = await this.bridge.request({ type: 'synthesize',
-        text: synthesisText(chunks[0], chunks.length === 1), rate: queued.rate });
+      const result=await this.requestSpeech(synthesisText(chunks[0],chunks.length===1),queued.rate,
+        ()=>this.generation===queued.generation&&(this.pending===queued||this.current?.queued===queued),{prefetch:true,chunk:0});
       this.metrics.preloadedPending++;
       return result;
     });
@@ -347,21 +422,30 @@ export class NeuralSpeaker {
       if (!this.sources.has(node)) return;
       clearTimeout(watchdog); node.onended = null; node.disconnect();
       this.sources.delete(node); done(this.valid(job));
+      this.emit('chunk.finished',{jobId:job.id,chunk:index,cancelled:!this.valid(job)});
     };
     this.sources.set(node, finish);
     watchdog = setTimeout(() => {
       if (!this.valid(job)) { finish(); return; }
-      this.stop();
+      // A delayed onended callback must not stop a healthy, already rendered
+      // buffer. Use the audio clock before declaring a stalled playback.
+      if(this.context?.state==='running' && this.context.currentTime>=start+buffer.duration){
+        this.metrics.recoveredEndEvents++;this.emit('audio.ended.recovered',{jobId:job.id,chunk:index});finish();return;
+      }
+      this.emit('audio.watchdog',{jobId:job.id,chunk:index,scheduledEnd:start+buffer.duration,audioTime:this.context?.currentTime});
+      this.stop('audio-watchdog');
       this.options.onError('Воспроизведение было прервано. Проверьте голос и повторите запуск.');
     }, Math.max(15000, (job.nextAudioTime - this.context.currentTime) * 1000 + 5000));
     node.onended = finish;
     try { node.start(start); }
     catch (error) { finish(); throw error; }
-    this.metrics.scheduledChunks++; job.playedChunks++;
+    this.metrics.scheduledChunks++; job.playedChunks++;job.lastEnded=ended;
+    this.emit('chunk.scheduled',{jobId:job.id,chunk:index,durationMs:Math.round(buffer.duration*1000)});
     if (index === 0) {
       job.started = true; this.metrics.played++;
       this.options.onStart(job.text, job.announcement, {
         ...job.metadata, voice: 'Dmitri', rate: job.rate,
+        jobId:job.id,
         textLength: job.text.length, firstChunkLength: job.chunks[0].length,
         chunkCount: job.chunks.length, synthesisMs: result.readyMs,
         afterRecognitionMs: this.time() - job.acceptedAt + (start - this.context.currentTime) * 1000,
@@ -402,10 +486,14 @@ export class NeuralSpeaker {
     else {
       this.metrics.completed++;
       this.options.onComplete?.({ chunkCount: job.chunks.length,
+        jobId:job.id,
         playedChunks: job.playedChunks, extensions: job.extensions || 0,
         elapsedMs: this.time() - job.acceptedAt, manual: job.manual });
     }
     this.current = null;
+    this.advance();
+  }
+  advance() {
     const next = this.pending; this.pending = null;
     if (next && this.options.isReading() && this.time() - next.time < 3000) {
       this.begin(next.text, false, false, next.metadata, next);

@@ -1,4 +1,4 @@
-GameVoice AI — Dmitri + OCR experiment 0.6.4
+GameVoice AI — Dmitri + OCR experiment 0.6.5
 
 This folder contains the experimental integration source. The camera,
 image preprocessing, OCR configuration and system speech implementation are

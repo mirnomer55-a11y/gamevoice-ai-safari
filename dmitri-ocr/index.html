@@ -228,7 +228,7 @@
   <main class="app">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Тест Dmitri + OCR · 0.6.4</span>
+      <span class="tag">Тест Dmitri + OCR · 0.6.5</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -322,7 +322,7 @@
   ></script>
 
   <script type="module">
-    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.4';
+    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.5';
     import { SubtitleFilter } from './subtitle-filter.mjs?v=0.6.2';
     import { CaptionGate, captionLines, lineQuality, ocrProfile } from './ocr-text.mjs?v=0.6.4';
     import { GlyphDetector, textCrop, maskOutsideRows, captionEvidence } from './subtitle-evidence.mjs?v=0.6.4';
@@ -345,7 +345,11 @@
       const speech = window.speechSynthesis;
       const LOCAL_VOICE = 'local:dmitri';
       const isLocal = () => voiceSelect.value === LOCAL_VOICE;
-      const measurements = { version: '0.6.4', started: new Date().toISOString(), ocrFrames: 0, skippedEmptyFrames: 0, rejectedFrames: {}, samples: [], completions: [] };
+      const measurements = { version: '0.6.5', started: new Date().toISOString(), ocrFrames: 0, skippedEmptyFrames: 0, rejectedFrames: {}, samples: [], completions: [], incomplete: [], events: [], lastStop: null };
+      function recordEvent(type, details = {}) {
+        measurements.events.push({ ...details, type, at: new Date().toISOString(), atMs: performance.now() });
+        if (measurements.events.length > 300) measurements.events.shift();
+      }
       let lastOCR = null;
       let preparingVoice = false;
       function recordMeasurement(sample) {
@@ -404,6 +408,8 @@
         loading: null,
         workerTicket: 0,
         scanTicket: 0,
+        ocrRecovery: null,
+        ocrRecoveryTimes: [],
         busy: false,
         timer: 0,
         regionVersion: 0,
@@ -644,6 +650,12 @@
           updateButtons();
         },
         onStatus: speechStatus,
+        onEvent: event => recordEvent('voice.' + event.type, event),
+        onWarning: message => speechStatus(message),
+        onIncomplete: sample => {
+          measurements.incomplete.push({ ...sample, at: new Date().toISOString() });
+          if (measurements.incomplete.length > 100) measurements.incomplete.shift();
+        },
         onUpdateText: text => {
           subtitleFilter.remember(text);
           recognized.textContent = text;
@@ -667,7 +679,8 @@
           if (measurements.completions.length > 100) measurements.completions.shift();
         },
         onError: message => {
-          stopReading('Озвучка остановлена. Проверьте голос и повторите запуск.');
+          recordEvent('voice.fatal', { message });
+          stopReading('Озвучка остановлена. ' + message, 'voice.fatal');
           speechStatus(message);
           updateButtons();
         }
@@ -676,7 +689,7 @@
         get current() { return isLocal() ? neural.current : systemSpeaker.current; },
         get pending() { return isLocal() ? neural.pending : systemSpeaker.pending; },
         set pending(value) { if (isLocal()) neural.pending = value; else systemSpeaker.pending = value; },
-        stop() { neural.stop(); systemSpeaker.stop(); },
+        stop(reason) { neural.stop(reason); systemSpeaker.stop(); },
         observe(text) { if (isLocal()) neural.observe(text); },
         enqueue(text) {
           if (isLocal()) neural.enqueue(text, lastOCR ? { ...lastOCR } : {});
@@ -692,7 +705,7 @@
 
       $('prepareDmitri').addEventListener('click', async () => {
         if (preparingVoice) return;
-        stopReading('Подготавливаю локальный голос…');
+        stopReading('Подготавливаю локальный голос…', 'user.prepare');
         preparingVoice = true; updateButtons();
         try {
           await neural.prepare();
@@ -704,15 +717,19 @@
         } finally { preparingVoice = false; updateButtons(); }
       });
       $('exportMetrics').addEventListener('click', () => {
+        recordEvent('metrics.export', { reading: state.reading, engine: neural.snapshot() });
         const report = {
           ...measurements, exportedAt: new Date().toISOString(),
           userAgent: navigator.userAgent, offlineReported: !navigator.onLine,
-          cameraAndOCR: true, voice: isLocal() ? 'Dmitri' : voiceSelect.value,
+          cameraAndOCR: state.reading, reading: state.reading, voice: isLocal() ? 'Dmitri' : voiceSelect.value,
           rate: Number(speedSelect.value), queue: { ...neural.metrics },
           filters: { ...subtitleFilter.metrics },
           stability: { ...gate.metrics }, ocrAccuracy: 'fast',
           screenWakeLock: !!screenLock,
-          note: 'Audio times are scheduling estimates, not physical speaker/Bluetooth latency. No camera images are included.'
+          engine: neural.snapshot(),
+          ui: { status: $('status').textContent, speechStatus: $('speechStatus').textContent,
+            visibility: document.visibilityState, camera: state.stream?.getVideoTracks()[0]?.readyState || 'none' },
+          note: 'Audio times are scheduling estimates, not physical speaker/Bluetooth latency. Events include failure/stop reasons but no camera images or caption text.'
         };
         const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -726,7 +743,7 @@
       speech?.addEventListener('voiceschanged', loadVoices);
 
       voiceSelect.addEventListener('change', () => {
-        stopReading('Голос изменён. Проверьте его и начните озвучку снова.');
+        stopReading('Голос изменён. Проверьте его и начните озвучку снова.', 'user.voice-change');
         save('gva.dmitri-ocr.voice', voiceSelect.value);
         updateButtons();
       });
@@ -736,7 +753,7 @@
         : '1';
 
       speedSelect.addEventListener('change', () => {
-        if (state.reading || speaker.current) stopReading('Скорость изменена. Начните озвучку снова.');
+        if (state.reading || speaker.current) stopReading('Скорость изменена. Начните озвучку снова.', 'user.speed-change');
         save('gva.dmitri-ocr.speed', speedSelect.value);
       });
 
@@ -753,7 +770,7 @@
 
       // Ignore the old accurate-mode preference: this version always uses fast OCR.
       $('testVoice').addEventListener('click', () => {
-        stopReading('Проверка голоса. После неё можно начать озвучку.');
+        stopReading('Проверка голоса. После неё можно начать озвучку.', 'user.test-voice');
         speaker.say('Проверка русского голоса. Всё готово.', true);
       });
 
@@ -766,8 +783,8 @@
 
       function updateButtons() {
         const local = isLocal();
-        readButton.disabled = !state.stream || !state.worker || !landscape() ||
-          preparingVoice || (local && !neural.ready);
+        readButton.disabled = !state.reading && (!state.stream || !state.worker || !landscape() ||
+          preparingVoice || (local && !neural.ready));
         $('prepareDmitri').hidden = !local;
         $('voicePreparation').hidden = !local;
         $('prepareDmitri').disabled = preparingVoice || (neural.ready && !neural.bridge?.closed);
@@ -784,13 +801,16 @@
         readButton.classList.toggle('stop', state.reading);
       }
 
-      function stopReading(message) {
+      function stopReading(message, reason = 'requested') {
+        measurements.lastStop = { reason, message: message || '', wasReading: state.reading,
+          visibility: document.visibilityState, engine: neural.snapshot(), at: new Date().toISOString() };
+        recordEvent('reading.stop', measurements.lastStop);
         state.reading = false;
         state.run++;
         releaseScreen();
 
         clearTimeout(state.timer);
-        speaker.stop();
+        speaker.stop(reason);
         gate.reset();
 
         speechStatus('Голос остановлен');
@@ -799,9 +819,9 @@
         if (message) status(message);
       }
 
-      function closeCamera(message) {
+      function closeCamera(message, reason = 'camera.closed') {
         state.cameraTicket++;
-        stopReading(message);
+        stopReading(message, reason);
         frameColours = null;
         colourPixels = null;
 
@@ -817,7 +837,7 @@
 
       cameraButton.addEventListener('click', async () => {
         if (state.stream) {
-          closeCamera('Камера выключена.');
+          closeCamera('Камера выключена.', 'camera.user-off');
           return;
         }
 
@@ -852,7 +872,7 @@
 
           stream.getVideoTracks()[0].addEventListener('ended', () => {
             if (state.stream === stream) {
-              closeCamera('Камера отключилась. Включите её снова.');
+              closeCamera('Камера отключилась. Включите её снова.', 'camera.ended');
             }
           });
 
@@ -910,6 +930,42 @@
         updateButtons();
       }
 
+      function recoverOCR(error, failedWorker) {
+        if (state.ocrRecovery) return state.ocrRecovery;
+        if (state.worker !== failedWorker) return Promise.resolve(false);
+        const run = state.run, stream = state.stream;
+        recordEvent('ocr.error', { message: String(error?.message || error).slice(0, 240) });
+        if (!state.reading) { discardWorker(); return Promise.resolve(false); }
+        const now = performance.now();
+        state.ocrRecoveryTimes = state.ocrRecoveryTimes.filter(t => now - t < 60000);
+        if (state.ocrRecoveryTimes.length >= 2) {
+          stopReading('Повторный сбой распознавания. Выключите и снова включите камеру.', 'ocr.recovery-limit');
+          discardWorker(); return Promise.resolve(false);
+        }
+        state.ocrRecoveryTimes.push(now);
+        // Preserve already started audio. OCR has an independent worker and
+        // must not cancel an audible caption on a single recognition error.
+        discardWorker(); gate.reset(); speaker.pending = null;
+        state.latestText = ''; speakTextButton.disabled = true;
+        rawText.textContent = 'Восстанавливаю распознавание…';
+        state.ocrRecovery = (async () => {
+          try {
+            await getWorker();
+            if (!state.reading || state.run !== run || state.stream !== stream) return false;
+            recordEvent('ocr.recovered'); status('Распознавание восстановлено. Жду субтитры…');
+            state.timer = setTimeout(scan, 0);
+            return true;
+          } catch (failure) {
+            if (state.reading && state.run === run) {
+              recordEvent('ocr.recovery-failed', { message: String(failure.message || failure).slice(0, 240) });
+              stopReading('Не удалось восстановить распознавание. Включите камеру снова.', 'ocr.recovery-failed');
+            }
+            return false;
+          } finally { state.ocrRecovery = null; updateButtons(); }
+        })();
+        return state.ocrRecovery;
+      }
+
       function getWorker() {
         if (state.worker) return Promise.resolve(state.worker);
         if (state.loading) return state.loading;
@@ -947,10 +1003,7 @@
             rejectFatal(new Error(String(error)));
 
             if (ticket === state.workerTicket && state.worker) {
-              stopReading(
-                'Сбой распознавания. Выключите и снова включите камеру.'
-              );
-              discardWorker();
+              void recoverOCR(new Error(String(error)), state.worker);
             }
           }
         });
@@ -975,6 +1028,8 @@
             tessedit_pageseg_mode: '6',
             user_defined_dpi: '150'
           });
+
+          if (ticket !== state.workerTicket) throw new Error('Загрузка отменена.');
 
           state.worker = worker;
           state.ocrModel = profile.id;
@@ -1143,7 +1198,7 @@
 
         if (!landscape() && state.reading) {
           stopReading(
-            'Поверните телефон горизонтально и начните озвучку снова.'
+            'Поверните телефон горизонтально и начните озвучку снова.', 'layout.portrait'
           );
         }
 
@@ -1300,7 +1355,7 @@
       }
 
       async function scan() {
-        if (!state.reading || state.busy) return;
+        if (!state.reading || state.busy || !state.worker || state.ocrRecovery) return;
 
         const run = state.run;
         const region = state.regionVersion;
@@ -1384,8 +1439,7 @@
           }
         } catch (error) {
           if (state.worker === worker) {
-            if (state.reading) stopReading(error.message);
-            discardWorker();
+            await recoverOCR(error, worker);
           }
         } finally {
           if (scanTicket === state.scanTicket) {
@@ -1398,7 +1452,7 @@
 
       readButton.addEventListener('click', () => {
         if (state.reading) {
-          stopReading('Озвучка остановлена.');
+          stopReading('Озвучка остановлена.', 'user.stop');
           speechStatus('Голос остановлен');
           return;
         }
@@ -1414,7 +1468,7 @@
         if (isLocal()) {
           try {
             neural.unlock().catch(error => {
-              stopReading('Safari не включил звук. Проверьте голос и повторите запуск.');
+              stopReading('Safari не включил звук. Проверьте голос и повторите запуск.', 'audio.unlock-failed');
               speechStatus(error.message);
             });
           } catch (error) { speechStatus(error.message); return; }
@@ -1423,6 +1477,8 @@
 
         state.reading = true;
         state.run++;
+        state.ocrRecoveryTimes = [];
+        recordEvent('reading.start', { run: state.run, voice: voiceSelect.value });
         keepScreenOn();
         state.latestText = '';
         speakTextButton.disabled = true;
@@ -1440,17 +1496,21 @@
       });
 
       document.addEventListener('visibilitychange', () => {
+        recordEvent('page.visibility', { visibility: document.visibilityState });
         if (document.hidden) {
           stopReading(
             'Работа приостановлена. ' +
-            'Вернитесь и начните озвучку снова.'
+            'Вернитесь и начните озвучку снова.', 'page.hidden'
           );
           speechStatus('Голос приостановлен');
         }
       });
 
+      window.addEventListener('error', event => recordEvent('page.error', { message: String(event.message || '').slice(0, 240) }));
+      window.addEventListener('unhandledrejection', event => recordEvent('page.rejection', { message: String(event.reason?.message || event.reason || '').slice(0, 240) }));
+
       window.addEventListener('pagehide', () => {
-        closeCamera('Камера выключена.');
+        closeCamera('Камера выключена.', 'page.hide');
         neural.destroy();
         updateButtons();
       });

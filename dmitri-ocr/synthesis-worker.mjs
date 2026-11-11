@@ -201,6 +201,11 @@ async function synthesize(text, rate) {
 }
 
 // A single queue also serializes asynchronous session.run() calls.
+export function failureInfo(error, type) {
+  const message = error?.message || String(error);
+  const utterance = type === 'synthesize' && /^(?:Не удалось подготовить произношение\.|Нет фонем для произношения\.|Неполная последовательность фонем\.|Нет начала предложения в фонемах\.|Нет окончания предложения в фонемах\.|Введите от 1 до |Движок не вернул звук\.|Движок вернул тишину\.)/u.test(message);
+  return { error: message, scope: utterance ? 'utterance' : 'engine', code: utterance ? 'speech-input' : 'speech-engine' };
+}
 let queue = Promise.resolve();
 if (typeof self !== 'undefined') self.onmessage = event => {
   const message = event.data;
@@ -216,7 +221,7 @@ if (typeof self !== 'undefined') self.onmessage = event => {
         throw new Error('Неизвестная команда движка.');
       }
     } catch (error) {
-      self.postMessage({ id, ok: false, error: error.message || String(error) });
+      self.postMessage({ id, ok: false, ...failureInfo(error, type) });
     }
   });
 };
