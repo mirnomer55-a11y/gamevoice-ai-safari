@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111114">
+  <meta name="application-version" content="0.7.3">
   <meta name="description" content="Озвучка русских игровых субтитров через камеру iPhone.">
   
   <title>GameVoice AI</title>
@@ -221,6 +222,20 @@
       .controls { gap: 8px; }
       .primary { min-height: 46px; }
     }
+  [hidden] { display: none !important; }
+.controls { gap: 8px; padding-bottom: 4px; }
+.main-actions, .settings-grid { display: grid; gap: 8px; }
+.main-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.main-actions .primary { min-height: 56px; padding: 8px; border-radius: 16px; font-size: 14px; line-height: 1.25; }
+.settings-grid { grid-template-columns: minmax(74px, .75fr) minmax(0, 1.25fr); }
+.field { min-width: 0; }
+.field label { font-size: 12px; margin-bottom: 4px; }
+.field select { min-height: 44px; font-size: 16px; padding: 8px; }
+.voice-tools { display: flex; gap: 8px; }
+.voice-tools .secondary { flex: 1; min-width: 0; min-height: 44px; padding: 8px; font-size: 14px; line-height: 1.25; }
+.live-status .status { font-size: 13px; }
+.live-status .small { margin-top: 3px; }
+
   
 body.access-locked main.app { visibility: hidden; pointer-events: none; }
 body.access-locked .rotate { display: none !important; }
@@ -272,7 +287,6 @@ body.access-locked .rotate { display: none !important; }
   <main class="app" inert aria-hidden="true">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Доступ активен · 0.7.2</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -293,63 +307,43 @@ body.access-locked .rotate { display: none !important; }
         </div>
       </div>
 
-      <aside class="controls">
-        <button class="primary" id="startCamera">Включить камеру</button>
-        <button class="primary" id="toggleReading" disabled>Начать озвучку</button>
-        <button class="secondary" id="prepareDmitri">Подготовить Dmitri</button>
-        <div class="small" id="voicePreparation" role="status">Используется ранее загруженный комплект neural-lab.</div>
-        <button class="secondary" id="testVoice">Проверить голос</button>
-        <button class="secondary" id="exportMetrics">Сохранить замеры</button>
-
-        <div class="status" id="status" role="status">
-          Включите камеру и выделите область субтитров.
-        </div>
-        <div class="small" id="speechStatus" role="status">
-          Голос ещё не проверен
+      <aside class="controls" aria-label="Настройки озвучки">
+        <div class="main-actions">
+          <button class="primary" id="startCamera">Включить камеру</button>
+          <button class="primary" id="toggleReading" disabled>Начать озвучку</button>
         </div>
 
-        <div>
-          <label for="voice">Русский голос</label>
-          <select id="voice">
-            <option>Загрузка голосов…</option>
-          </select>
+        <div class="live-status">
+          <div class="status" id="status" role="status">Включите камеру и выделите область субтитров.</div>
+          <div class="small" id="speechStatus" role="status">Озвучка выключена</div>
         </div>
 
-        <div>
-          <label for="speed">Скорость речи</label>
-          <select id="speed">
-            <option value="0.5">0,5×</option>
-            <option value="1" selected>1,0×</option>
-            <option value="1.5">1,5×</option>
-          </select>
+        <div class="field">
+          <label for="voice">Голос</label>
+          <select id="voice"><option>Загрузка голосов…</option></select>
         </div>
-
-        <div>
-          <label for="processing">Вид субтитров</label>
-          <select id="processing">
-            <option value="light">Белые или жёлтые</option>
-            <option value="original">Тёмные или другого цвета</option>
-          </select>
+        <div class="voice-tools">
+          <button class="secondary" id="prepareDmitri">Подготовить голос</button>
+          <button class="secondary" id="testVoice">Проверить голос</button>
         </div>
+        <div class="small" id="voicePreparation" role="status" hidden></div>
 
-        <div>
-          <span class="field-title">Субтитры в рамке</span>
-          <div class="recognized" id="rawText">Пока текст не распознан</div>
-
-          <span class="field-title">Последняя реплика для озвучки</span>
-          <div class="recognized" id="recognized">Здесь появятся субтитры</div>
-
-          <button
-            class="secondary"
-            id="speakText"
-            style="width:100%;margin-top:8px"
-            disabled
-          >Прочитать найденный текст</button>
-        </div>
-
-        <div class="small">
-          Используется быстрое распознавание. Кадры обрабатываются на устройстве. Для первой загрузки
-          распознавания нужен интернет.
+        <div class="settings-grid">
+          <div class="field">
+            <label for="speed">Скорость</label>
+            <select id="speed">
+              <option value="0.5">0,5×</option>
+              <option value="1" selected>1,0×</option>
+              <option value="1.5">1,5×</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="processing">Субтитры</label>
+            <select id="processing" aria-label="Цвет субтитров">
+              <option value="light">Светлые</option>
+              <option value="original">Другие цвета</option>
+            </select>
+          </div>
         </div>
       </aside>
     </section>
@@ -715,7 +709,10 @@ body.access-locked .rotate { display: none !important; }
     (() => {
       'use strict';
 
-      const $ = id => document.getElementById(id);
+      // Optional output panels use detached nodes; the reading pipeline stays independent of the UI.
+      const internalUI = new Map(['rawText', 'recognized', 'speakText', 'exportMetrics'].map(id =>
+        [id, document.createElement(id === 'speakText' || id === 'exportMetrics' ? 'button' : 'span')]));
+      const $ = id => document.getElementById(id) || internalUI.get(id);
 
       const video = $('video');
       const overlay = $('overlay');
@@ -810,7 +807,7 @@ body.access-locked .rotate { display: none !important; }
       };
 
       const speechStatus = text => {
-        $('speechStatus').textContent = text;
+        $('speechStatus').textContent = String(text).replaceAll('«Подготовить Dmitri»', '«Подготовить голос»').replaceAll('Dmitri', 'Голос');
       };
 
       const clamp = (number, low, high) =>
@@ -889,9 +886,9 @@ body.access-locked .rotate { display: none !important; }
         const previous = voiceSelect.value || setting('gva.dmitri-ocr.voice') || LOCAL_VOICE;
         state.voices = (speech?.getVoices() || []).filter(voice => /^ru([-_]|$)/i.test(voice.lang));
         voiceSelect.replaceChildren();
-        voiceSelect.add(new Option('Dmitri — локальный нейросетевой', LOCAL_VOICE));
+        voiceSelect.add(new Option('Дмитрий', LOCAL_VOICE));
         for (const voice of state.voices) {
-          voiceSelect.add(new Option(voice.name + ' — ' + voice.lang, voice.voiceURI));
+          voiceSelect.add(new Option(voice.name, voice.voiceURI));
         }
         if (!state.voices.length) voiceSelect.add(new Option('Русский голос системы', ''));
         voiceSelect.value = previous === LOCAL_VOICE ? LOCAL_VOICE :
@@ -1028,11 +1025,11 @@ body.access-locked .rotate { display: none !important; }
         isReading: () => state.reading,
         beforePrepare: ensureServiceWorker,
         onProgress: (complete, total) => {
-          $('voicePreparation').textContent = 'Проверяю файлы Dmitri: ' +
+          $('voicePreparation').textContent = 'Подготовка голоса: ' +
             Math.round(complete / 1000000) + ' из ' + Math.ceil(total / 1000000) + ' МБ';
         },
         onReady: () => {
-          $('voicePreparation').textContent = 'Dmitri готов. Модель загружена в память.';
+          $('voicePreparation').textContent = 'Голос готов.';
           updateButtons();
         },
         onStatus: speechStatus,
@@ -1048,8 +1045,7 @@ body.access-locked .rotate { display: none !important; }
           gate.spoken = key(text);
         },
         onStart: (text, announcement, sample) => {
-          speechStatus('Dmitri · синтез ' + Math.round(sample.synthesisMs) +
-            ' мс · от готового текста до аудио ' + Math.round(sample.afterRecognitionMs) + ' мс');
+          speechStatus('Озвучиваю реплику…');
           if (!announcement) {
             gate.spoken = key(text);
             subtitleFilter.remember(text);
@@ -1095,8 +1091,8 @@ body.access-locked .rotate { display: none !important; }
         preparingVoice = true; updateButtons();
         try {
           await neural.prepare();
-          speechStatus('Dmitri готов. Можно проверить голос и включить озвучку.');
-          status('Dmitri подготовлен. Выделите субтитры и начните озвучку.');
+          speechStatus('Голос готов. Можно включить озвучку.');
+          status('Выделите субтитры и начните озвучку.');
         } catch (error) {
           speechStatus(error.message);
           $('voicePreparation').textContent = 'Повторите подготовку после устранения ошибки.';
@@ -1171,10 +1167,10 @@ body.access-locked .rotate { display: none !important; }
         const local = isLocal();
         readButton.disabled = !state.reading && (!state.stream || !state.worker || !landscape() ||
           preparingVoice || (local && !neural.ready));
-        $('prepareDmitri').hidden = !local;
-        $('voicePreparation').hidden = !local;
+        $('prepareDmitri').hidden = !local || (neural.ready && !neural.bridge?.closed && !preparingVoice);
+        $('voicePreparation').hidden = !local || !preparingVoice;
         $('prepareDmitri').disabled = preparingVoice || (neural.ready && !neural.bridge?.closed);
-        $('prepareDmitri').textContent = neural.ready ? 'Dmitri подготовлен' : 'Подготовить Dmitri';
+        $('prepareDmitri').textContent = neural.ready ? 'Голос готов' : 'Подготовить голос';
         $('testVoice').disabled = preparingVoice || (local && !neural.ready);
         speakTextButton.disabled = !state.latestText || preparingVoice || (local && !neural.ready);
         voiceSelect.disabled = preparingVoice;
