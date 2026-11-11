@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'gamevoice-access-v2';
+const CACHE = 'gamevoice-access-v3';
 const VOICE_CACHE = 'gamevoice-neural-lab-v1';
 const HOME = new URL('./', self.registration.scope);
 const LAB = new URL('../neural-lab/', HOME);

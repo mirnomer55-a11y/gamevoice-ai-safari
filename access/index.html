@@ -272,7 +272,7 @@ body.access-locked .rotate { display: none !important; }
   <main class="app" inert aria-hidden="true">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Доступ активен · 0.7.1</span>
+      <span class="tag">Доступ активен · 0.7.2</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -475,7 +475,7 @@ body.access-locked .rotate { display: none !important; }
       this.apiURL = api.origin;
       this.signingKey = publicJwk(config.signingPublicKey);
       this.store = store || indexedStore();
-      this.request = request || fetch;
+      this.request = request || globalThis.fetch.bind(globalThis);
     }
     async device() {
       let value = await this.store.get("device");
