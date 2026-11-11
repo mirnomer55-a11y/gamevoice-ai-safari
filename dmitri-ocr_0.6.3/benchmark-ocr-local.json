@@ -1,0 +1,84 @@
+{
+  "created": "2026-11-10T17:57:13.335Z",
+  "environment": {
+    "runtime": "v24.22.1",
+    "platform": "linux",
+    "engine": "Tesseract.js 5.1.1 / WASM",
+    "camera": false,
+    "note": "Controlled synthetic images only; not iPhone timings or a real-game accuracy guarantee."
+  },
+  "results": [
+    {
+      "fixture": "two-lines",
+      "mode": "fast",
+      "medianMs": 161,
+      "characterErrors": 2,
+      "characters": 97,
+      "tailRetained": true,
+      "text": "Гарри: Мы должны добраться ло замка до наступления темноты\nВозьми карту и проверь оборулование перед возвращением"
+    },
+    {
+      "fixture": "four-lines",
+      "mode": "fast",
+      "medianMs": 164,
+      "characterErrors": 0,
+      "characters": 127,
+      "tailRetained": true,
+      "text": "Нам нужно выбраться отсюда, пока стража не вернулась.\nПроверь оборудование и возьми с собой карту.\n\nПотом встретимся у северной двери замка.\n\nНе забудь ключ."
+    },
+    {
+      "fixture": "faint-ending",
+      "mode": "fast",
+      "medianMs": 90,
+      "characterErrors": 4,
+      "characters": 75,
+      "tailRetained": false,
+      "text": "Нам нужно выбраться отсюда до наступления темноты.\nПроверь оборудование и не забудь"
+    },
+    {
+      "fixture": "small-subtitles",
+      "mode": "fast",
+      "medianMs": 83,
+      "characterErrors": 0,
+      "characters": 82,
+      "tailRetained": true,
+      "text": "Мы должны проверить оборудование перед возвращением\nНам нельзя забывать ключ от северной двери"
+    },
+    {
+      "fixture": "two-lines",
+      "mode": "accurate",
+      "medianMs": 384,
+      "characterErrors": 0,
+      "characters": 97,
+      "tailRetained": true,
+      "text": "Гарри: Мы должны добраться до замка до наступления темноты.\nВозьми карту и проверь оборудование перед возвращением."
+    },
+    {
+      "fixture": "four-lines",
+      "mode": "accurate",
+      "medianMs": 469,
+      "characterErrors": 0,
+      "characters": 127,
+      "tailRetained": true,
+      "text": "Нам нужно выбраться отсюда, пока стража не вернулась.\nПроверь оборудование и возьми с собой карту.\n\nПотом встретимся у северной двери замка.\n\nНе забудь ключ."
+    },
+    {
+      "fixture": "faint-ending",
+      "mode": "accurate",
+      "medianMs": 257,
+      "characterErrors": 0,
+      "characters": 75,
+      "tailRetained": true,
+      "text": "Нам нужно выбраться отсюда до наступления темноты.\nПроверь оборудование и не забудь ключ."
+    },
+    {
+      "fixture": "small-subtitles",
+      "mode": "accurate",
+      "medianMs": 229,
+      "characterErrors": 0,
+      "characters": 82,
+      "tailRetained": true,
+      "text": "Мы должны проверить оборудование перед возвращением.\nНам нельзя забывать ключ от северной двери."
+    }
+  ]
+}

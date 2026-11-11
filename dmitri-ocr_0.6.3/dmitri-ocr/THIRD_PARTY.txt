@@ -1,0 +1,35 @@
+GameVoice AI — Dmitri + OCR experiment 0.6.3
+
+This folder contains the experimental integration source. The camera,
+image preprocessing, OCR configuration and system speech implementation are
+derived from the user's working GameVoice AI web app 0.5.0.
+
+Russian neural voice and runtime are reused from ../neural-lab/.
+Sources, exact package versions, model revision and licenses:
+../neural-lab/THIRD_PARTY.txt
+https://huggingface.co/rhasspy/piper-voices
+https://github.com/microsoft/onnxruntime/tree/v1.24.3
+https://github.com/diffusion-studio/piper-wasm
+https://github.com/rhasspy/espeak-ng
+
+The integrated neural speech code is distributed under GPLv3-or-later,
+with the individual components retaining their original licenses.
+License text is included in ../neural-lab/sources/ESPEAK-GPL3.txt.
+
+OCR: Tesseract.js 5.1.1 and tesseract.js-core 5.1.1, Apache-2.0.
+https://github.com/naptha/tesseract.js/tree/v5.1.1
+https://github.com/naptha/tesseract.js-core
+Russian fast language data is loaded from the existing configured source:
+https://tessdata.projectnaptha.com/4.0.0_fast
+
+No server receives camera frames or text for synthesis. Session metrics
+are exported only when the user presses the save button.
+
+Optional accurate OCR mode uses the official Russian tessdata_best LSTM model.
+Pinned revision: e12c65a915945e4c28e237a9b52bc4a8f39a0cec
+Source: https://github.com/tesseract-ocr/tessdata_best/tree/e12c65a915945e4c28e237a9b52bc4a8f39a0cec
+Model: rus.traineddata (15301764 bytes)
+SHA-256: b617eb6830ffabaaa795dd87ea7fd251adfe9cf0efe05eb9a2e8128b7728d6b6
+Model license and upstream notices: https://github.com/tesseract-ocr/tessdata_best/blob/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/LICENSE
+The model is downloaded into the browser language cache, not included here.
+
