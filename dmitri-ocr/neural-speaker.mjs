@@ -1,4 +1,4 @@
-import { captionTail } from './ocr-text.mjs?v=0.6.3';
+import { captionTail } from './ocr-text.mjs?v=0.6.4';
 const LAB = new URL('../neural-lab/', import.meta.url);
 const VOICE_CACHE = 'gamevoice-neural-lab-v1';
 const now = () => performance.now();
@@ -135,11 +135,13 @@ export class NeuralSpeaker {
     this.ready = false; this.loading = null; this.bridge = null;
     this.current = null; this.pending = null; this.generation = 0;
     this.context = null; this.sources = new Map();
-    this.unlocked = Promise.resolve(); this.serial = Promise.resolve();
+    this.unlocked = Promise.resolve(); this.serial = Promise.resolve(); this.resuming = null;
     this.metrics = { droppedBeforePlayback: 0, replacedPending: 0, played: 0,
-      completed: 0, scheduledChunks: 0, preloadedPending: 0, extendedCaptions: 0, appendedChunks: 0, playbackGapsMs: [] };
+      completed: 0, scheduledChunks: 0, preloadedPending: 0, extendedCaptions: 0, appendedChunks: 0,
+      audioResumes: 0, playbackGapsMs: [] };
     this.blankAt = null;
   }
+  time() { return this.options.clock?.() ?? now(); }
   async prepare() {
     if (this.ready && !this.bridge?.closed) return;
     if (this.loading) return this.loading;
@@ -168,9 +170,25 @@ export class NeuralSpeaker {
       this.context = new Audio({ latencyHint: 'interactive' });
     }
     // Call synchronously from the original click to preserve Safari activation.
-    this.unlocked = this.context.resume();
+    this.unlocked = this.resumeAudio();
     this.unlocked.catch(() => {});
     return this.unlocked;
+  }
+  resumeAudio() {
+    if (this.context?.state === 'running') return Promise.resolve();
+    if (this.resuming) return this.resuming;
+    const message = 'Safari приостановил звук. Нажмите «Проверить голос» и начните озвучку снова.';
+    if (!this.context || this.context.state === 'closed') return Promise.reject(new Error(message));
+    let timer, request;
+    try { request = this.context.resume(); } catch { return Promise.reject(new Error(message)); }
+    const context = this.context;
+    const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), 1500); });
+    const attempt = Promise.race([request, deadline]).then(() => {
+      if (this.context !== context || context.state !== 'running') throw new Error(message);
+      this.metrics.audioResumes++;
+    }).finally(() => { clearTimeout(timer); if (this.resuming === attempt) this.resuming = null; });
+    this.resuming = attempt;
+    return attempt;
   }
   stop() {
     this.generation++; this.current = null; this.pending = null; this.blankAt = null;
@@ -186,8 +204,8 @@ export class NeuralSpeaker {
   }
   observe(text) {
     if (text) { this.blankAt = null; return; }
-    if (this.blankAt === null) this.blankAt = now();
-    if (now() - this.blankAt <= 1000) return;
+    if (this.blankAt === null) this.blankAt = this.time();
+    if (this.time() - this.blankAt <= 1000) return;
     this.pending = null;
     // A vanished caption may be discarded only before its first sound.
     if (this.current && !this.current.started && !this.current.manual) this.current.abandon = true;
@@ -202,11 +220,11 @@ export class NeuralSpeaker {
     if (this.options.similar(key, this.current?.key)) return;
     if (this.current) {
       if (this.pending && this.options.similar(key, this.options.key(this.pending.text))) {
-        this.pending.time = now();
+        this.pending.time = this.time();
         return;
       }
       if (this.pending) this.metrics.replacedPending++;
-      this.pending = { text, time: now(), acceptedAt: now(), metadata,
+      this.pending = { text, time: this.time(), acceptedAt: this.time(), metadata,
         generation: this.generation, rate: this.options.getRate(), prepared: null };
       this.prefetchPending();
       return;
@@ -225,7 +243,7 @@ export class NeuralSpeaker {
     // Once audible, finish ALL of this caption, not just its current fragment.
     return !job.started && !job.manual && (job.abandon || this.freshPending());
   }
-  freshPending() { return this.pending && now() - this.pending.time < 3000; }
+  freshPending() { return this.pending && this.time() - this.pending.time < 3000; }
   canExtend(text) {
     const job = this.current;
     return !!job && !job.manual && this.valid(job) && !!captionTail(job.text, text);
@@ -259,11 +277,14 @@ export class NeuralSpeaker {
     const job = {
       text, key: announcement ? '' : this.options.key(text), chunks,
       generation: this.generation, rate: queued?.rate ?? this.options.getRate(),
-      manual, announcement, metadata, acceptedAt: queued?.acceptedAt ?? now(),
-      started: false, abandon: false, finishing: false, nextAudioTime: 0, launchedAt: now(),
-      queued, playedChunks: 0, queueWaitMs: queued ? now() - queued.acceptedAt : 0
+      manual, announcement, metadata, acceptedAt: queued?.acceptedAt ?? this.time(),
+      started: false, abandon: false, finishing: false, nextAudioTime: 0, launchedAt: this.time(),
+      queued, playedChunks: 0, queueWaitMs: queued ? this.time() - queued.acceptedAt : 0
     };
     this.current = job;
+    // After minutes of silence Safari may suspend an otherwise prepared audio
+    // context. Resume alongside synthesis, without reloading or warming a model.
+    job.audioReady = this.resumeAudio(); job.audioReady.catch(() => {});
     this.run(job).catch(error => {
       if (!this.valid(job)) return;
       if (this.bridge?.closed) this.ready = false;
@@ -301,9 +322,11 @@ export class NeuralSpeaker {
     queued.prepared.catch(() => {});
   }
   async schedule(job, result, index) {
-    await this.unlocked;
+    await job.audioReady;
     if (!this.valid(job) || this.outdated(job)) return null;
-    if (!job.started && !job.manual && now() - job.launchedAt > 3500) return null;
+    if (this.context?.state !== 'running') await this.resumeAudio();
+    if (!this.valid(job) || this.outdated(job)) return null;
+    if (!job.started && !job.manual && this.time() - job.launchedAt > 3500) return null;
     if (this.context?.state !== 'running') {
       throw new Error('Звук Safari приостановлен. Нажмите «Проверить голос» и начните озвучку снова.');
     }
@@ -341,7 +364,7 @@ export class NeuralSpeaker {
         ...job.metadata, voice: 'Dmitri', rate: job.rate,
         textLength: job.text.length, firstChunkLength: job.chunks[0].length,
         chunkCount: job.chunks.length, synthesisMs: result.readyMs,
-        afterRecognitionMs: now() - job.acceptedAt + (start - this.context.currentTime) * 1000,
+        afterRecognitionMs: this.time() - job.acceptedAt + (start - this.context.currentTime) * 1000,
         queueWaitMs: job.queueWaitMs,
         assetReadsDuringSynthesis: result.assetReadsDuringSynthesis,
         phonemeGroups: result.phonemeGroups ?? 1, manual: job.manual
@@ -380,11 +403,11 @@ export class NeuralSpeaker {
       this.metrics.completed++;
       this.options.onComplete?.({ chunkCount: job.chunks.length,
         playedChunks: job.playedChunks, extensions: job.extensions || 0,
-        elapsedMs: now() - job.acceptedAt, manual: job.manual });
+        elapsedMs: this.time() - job.acceptedAt, manual: job.manual });
     }
     this.current = null;
     const next = this.pending; this.pending = null;
-    if (next && this.options.isReading() && now() - next.time < 3000) {
+    if (next && this.options.isReading() && this.time() - next.time < 3000) {
       this.begin(next.text, false, false, next.metadata, next);
     } else this.options.onStatus('Dmitri готов');
   }

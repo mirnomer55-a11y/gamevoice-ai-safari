@@ -228,7 +228,7 @@
   <main class="app">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Тест Dmitri + OCR · 0.6.3</span>
+      <span class="tag">Тест Dmitri + OCR · 0.6.4</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -289,16 +289,7 @@
         </div>
 
         <div>
-          <label for="ocrAccuracy">Распознавание</label>
-          <select id="ocrAccuracy">
-            <option value="fast">Быстрее</option>
-            <option value="accurate">Точнее</option>
-          </select>
-          <div class="small">«Точнее» может увеличить задержку. Для первой загрузки этого режима нужен интернет.</div>
-        </div>
-
-        <div>
-          <span class="field-title">Текст из рамки</span>
+          <span class="field-title">Субтитры в рамке</span>
           <div class="recognized" id="rawText">Пока текст не распознан</div>
 
           <span class="field-title">Последняя реплика для озвучки</span>
@@ -313,7 +304,7 @@
         </div>
 
         <div class="small">
-          Кадры обрабатываются на iPhone. Для первой загрузки
+          Используется быстрое распознавание. Кадры обрабатываются на устройстве. Для первой загрузки
           распознавания нужен интернет.
         </div>
       </aside>
@@ -331,9 +322,10 @@
   ></script>
 
   <script type="module">
-    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.3';
+    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.4';
     import { SubtitleFilter } from './subtitle-filter.mjs?v=0.6.2';
-    import { CaptionGate, captionLines, lineQuality, ocrProfile, preserveLightDetails } from './ocr-text.mjs?v=0.6.3';
+    import { CaptionGate, captionLines, lineQuality, ocrProfile } from './ocr-text.mjs?v=0.6.4';
+    import { GlyphDetector, textCrop, maskOutsideRows, captionEvidence } from './subtitle-evidence.mjs?v=0.6.4';
     (() => {
       'use strict';
 
@@ -349,20 +341,33 @@
       const rawText = $('rawText');
       const recognized = $('recognized');
       const processing = $('processing');
-      const accuracySelect = $('ocrAccuracy');
       const speakTextButton = $('speakText');
       const speech = window.speechSynthesis;
       const LOCAL_VOICE = 'local:dmitri';
       const isLocal = () => voiceSelect.value === LOCAL_VOICE;
-      const measurements = { version: '0.6.3', started: new Date().toISOString(), ocrFrames: 0, samples: [], completions: [] };
+      const measurements = { version: '0.6.4', started: new Date().toISOString(), ocrFrames: 0, skippedEmptyFrames: 0, rejectedFrames: {}, samples: [], completions: [] };
       let lastOCR = null;
       let preparingVoice = false;
-      let changingOCR = false;
       function recordMeasurement(sample) {
         measurements.samples.push({ ...sample, at: new Date().toISOString() });
         if (measurements.samples.length > 100) measurements.samples.shift();
       }
       let serviceWorkerPromise = null;
+      let screenLock = null, screenTicket = 0;
+      function releaseScreen() {
+        screenTicket++;
+        const lock = screenLock; screenLock = null;
+        if (lock) Promise.resolve(lock.release()).catch(() => {});
+      }
+      function keepScreenOn() {
+        const ticket = ++screenTicket;
+        if (!navigator.wakeLock || document.hidden) return;
+        navigator.wakeLock.request('screen').then(lock => {
+          if (ticket !== screenTicket || !state.reading || document.hidden) return lock.release();
+          screenLock = lock;
+          lock.addEventListener('release', () => { if (screenLock === lock) screenLock = null; });
+        }).catch(() => {});
+      }
       function ensureServiceWorker() {
         if (serviceWorkerPromise) return serviceWorkerPromise;
         serviceWorkerPromise = (async () => {
@@ -370,10 +375,7 @@
             throw new Error('Для локального голоса откройте страницу по HTTPS в Safari.');
           }
           const target = new URL('./service-worker.js', location.href).href;
-          const existing = await navigator.serviceWorker.getRegistration(location.href);
-          if (existing?.active?.scriptURL !== target) {
-            await navigator.serviceWorker.register(target, { updateViaCache: 'none' });
-          }
+          await navigator.serviceWorker.register(target, { updateViaCache: 'none' });
           if (navigator.serviceWorker.controller?.scriptURL === target) return;
           await new Promise((resolve, reject) => {
             const changed = () => {
@@ -657,6 +659,7 @@
           }
           recordMeasurement({ ...sample, cameraAndOCR: state.reading,
             fromCandidateMs: sample.candidateSince == null ? null : performance.now() - sample.candidateSince,
+            fromFrameStartMs: sample.frameStartedAt == null ? null : performance.now() - sample.frameStartedAt,
             fromOcrStartMs: sample.ocrStartedAt == null ? null : performance.now() - sample.ocrStartedAt });
         },
         onComplete: sample => {
@@ -707,7 +710,8 @@
           cameraAndOCR: true, voice: isLocal() ? 'Dmitri' : voiceSelect.value,
           rate: Number(speedSelect.value), queue: { ...neural.metrics },
           filters: { ...subtitleFilter.metrics },
-          stability: { ...gate.metrics }, ocrAccuracy: state.ocrModel || accuracySelect.value,
+          stability: { ...gate.metrics }, ocrAccuracy: 'fast',
+          screenWakeLock: !!screenLock,
           note: 'Audio times are scheduling estimates, not physical speaker/Bluetooth latency. No camera images are included.'
         };
         const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -747,20 +751,7 @@
         speaker.pending = null;
       });
 
-      accuracySelect.value = setting('gva.dmitri-ocr.accuracy') === 'accurate' ? 'accurate' : 'fast';
-      accuracySelect.addEventListener('change', async () => {
-        if (changingOCR) return;
-        changingOCR = true;
-        save('gva.dmitri-ocr.accuracy', accuracySelect.value);
-        stopReading('Меняю режим распознавания…');
-        discardWorker();
-        try {
-          if (state.stream) await getWorker();
-          status('Режим распознавания выбран. Начните озвучку.');
-        } catch (error) { status(error.message); }
-        finally { changingOCR = false; updateButtons(); }
-      });
-
+      // Ignore the old accurate-mode preference: this version always uses fast OCR.
       $('testVoice').addEventListener('click', () => {
         stopReading('Проверка голоса. После неё можно начать озвучку.');
         speaker.say('Проверка русского голоса. Всё готово.', true);
@@ -785,7 +776,6 @@
         speakTextButton.disabled = !state.latestText || preparingVoice || (local && !neural.ready);
         voiceSelect.disabled = preparingVoice;
         speedSelect.disabled = preparingVoice;
-        accuracySelect.disabled = preparingVoice || changingOCR || (!state.worker && !!state.loading);
 
         readButton.textContent = state.reading
           ? 'Остановить озвучку'
@@ -797,6 +787,7 @@
       function stopReading(message) {
         state.reading = false;
         state.run++;
+        releaseScreen();
 
         clearTimeout(state.timer);
         speaker.stop();
@@ -932,7 +923,7 @@
         }
 
         const ticket = ++state.workerTicket;
-        const profile = ocrProfile(accuracySelect.value);
+        const profile = ocrProfile();
         let initializingWorker = null;
 
         status('Загружаю распознавание русского текста · ' + profile.label + '…');
@@ -1159,6 +1150,7 @@
         updateButtons();
       });
 
+      const glyphDetector = new GlyphDetector();
       const sourceCanvas = document.createElement('canvas');
       const ocrCanvas = document.createElement('canvas');
       let frameColours = null;
@@ -1263,99 +1255,31 @@
         colourPixels.set(pixels);
         frameColours = { data: colourPixels, width: sourceCanvas.width, height: sourceCanvas.height,
           mode: 'light', threshold, offsetX: 0, offsetY: 0 };
-        if (accuracySelect.value === 'accurate') {
-          // Keep faint final letters and every line inside the user's ROI.
-          frameColours.threshold = Math.min(threshold, 180);
-          preserveLightDetails(pixels);
-          context.putImageData(image, 0, 0);
-          ocrCanvas.width = sourceCanvas.width + 24;
-          ocrCanvas.height = sourceCanvas.height + 24;
-          frameColours.offsetX = frameColours.offsetY = -12;
-          const output = ocrCanvas.getContext('2d');
-          output.fillStyle = 'white';
-          output.fillRect(0, 0, ocrCanvas.width, ocrCanvas.height);
-          output.drawImage(sourceCanvas, 12, 12);
-          return ocrCanvas;
-        }
-        const rows = new Uint32Array(sourceCanvas.height);
 
         for (let i = 0; i < pixels.length; i += 4) {
           const ink = Math.min(pixels[i], pixels[i + 1]) >= threshold;
 
           pixels[i] = pixels[i + 1] = pixels[i + 2] = ink ? 0 : 255;
 
-          if (ink) {
-            rows[Math.floor(i / 4 / sourceCanvas.width)]++;
-          }
         }
 
+        frameColours.textRows = glyphDetector.find(pixels, sourceCanvas.width, sourceCanvas.height);
+        if (!frameColours.textRows.length) return null;
+        const crop = textCrop(frameColours.textRows, sourceCanvas.width, sourceCanvas.height);
+        if (!crop) return null;
+        frameColours.textRows = crop.rows;
+        maskOutsideRows(pixels, sourceCanvas.width, sourceCanvas.height, crop.rows);
         context.putImageData(image, 0, 0);
-
-        let peak = 0;
-        for (const count of rows) peak = Math.max(peak, count);
-
-        const cutoff = Math.max(
-          8,
-          sourceCanvas.width * 0.012,
-          peak * 0.2
-        );
-
-        const bands = [];
-
-        // Ищем строки внутри выбранной пользователем широкой рамки.
-        for (let y = 0; y < rows.length; y++) {
-          if (rows[y] < cutoff) continue;
-
-          let band = bands[bands.length - 1];
-
-          if (!band || y - band.end > 4) {
-            band = { start: y, end: y, score: 0 };
-            bands.push(band);
-          }
-
-          band.end = y;
-          band.score += rows[y];
-        }
-
-        const useful = bands.filter(band => band.end - band.start >= 5);
-        if (!useful.length) return null;
-
-        const best = useful.reduce(
-          (a, b) => a.score > b.score ? a : b
-        );
-
-        const lineHeight = best.end - best.start + 1;
-
-        const near = useful.filter(band =>
-          band.score >= best.score * 0.25 &&
-          band.start <= best.end + lineHeight * 2.5 &&
-          band.end >= best.start - lineHeight * 2.5
-        );
-
-        const top = Math.max(
-          0,
-          Math.min(...near.map(band => band.start)) - 5
-        );
-
-        const bottom = Math.min(
-          rows.length,
-          Math.max(...near.map(band => band.end)) + 6
-        );
-
-        ocrCanvas.width = sourceCanvas.width + 24;
+        const { left, right, top, bottom } = crop;
+        ocrCanvas.width = right - left + 24;
         ocrCanvas.height = bottom - top + 24;
-        frameColours.offsetX = -12;
+        frameColours.offsetX = left - 12;
         frameColours.offsetY = top - 12;
-
         const output = ocrCanvas.getContext('2d');
         output.fillStyle = 'white';
         output.fillRect(0, 0, ocrCanvas.width, ocrCanvas.height);
-
-        output.drawImage(
-          sourceCanvas,
-          0, top, sourceCanvas.width, bottom - top,
-          12, 12, sourceCanvas.width, bottom - top
-        );
+        output.drawImage(sourceCanvas, left, top, right - left, bottom - top,
+          12, 12, right - left, bottom - top);
 
         return ocrCanvas;
       }
@@ -1366,11 +1290,13 @@
         if (valid.length > 6) return { text: '', confidence: 0, ...quality, blocked: 'many-lines' };
         const filtered = subtitleFilter.sanitize(valid, frameColours);
         if (filtered.text.length > 500) return { text: '', confidence: 0, ...quality, blocked: 'length' };
+        if (!filtered.text) return { ...filtered, ...quality, text: '', confidence: 0 };
+        const evidence = captionEvidence(valid, filtered.text, frameColours);
+        if (!evidence.ok) return { text: '', confidence: 0, ...quality, blocked: evidence.reason };
         const length = valid.reduce((sum, line) => sum + line.text.length, 0);
-        return {
-          ...filtered, ...quality, text: clean(filtered.text),
-          confidence: length ? valid.reduce((sum, line) => sum + Number(line.confidence) * line.text.length, 0) / length : 0
-        };
+        const confidence = length ? valid.reduce((sum, line) => sum + Number(line.confidence) * line.text.length, 0) / length : 0;
+        return { ...filtered, ...quality, text: clean(filtered.text),
+          confidence: Math.min(confidence, evidence.confidence), wordCount: evidence.wordCount, visual: evidence.visual };
       }
 
       async function scan() {
@@ -1385,6 +1311,7 @@
         try {
           if (state.drag) return;
 
+          const frameStartedAt = performance.now();
           const frame = prepareFrame();
           const start = performance.now();
 
@@ -1425,48 +1352,33 @@
             return;
           }
 
-          rawText.textContent = clean(data.text) ||
-            'В рамке пока нет распознанного текста';
-
           const result = readResult(data);
           frameColours = null;
-          if (result.blocked) speaker.pending = null;
-          lastOCR = { ocrMs: performance.now() - start, ocrStartedAt: start };
+          lastOCR = { ocrMs: performance.now() - start, ocrStartedAt: start,
+            framePrepMs: start - frameStartedAt, frameStartedAt };
           measurements.ocrFrames++;
-          speaker.observe(result.text);
-          state.latestText = result.text;
-          speakTextButton.disabled = !result.text;
-
-          if (
-            result.text &&
-            speaker.pending &&
-            !similar(key(result.text), key(speaker.pending.text))
-          ) {
-            speaker.pending = null;
-          }
-
+          if (!frame) measurements.skippedEmptyFrames++;
+          if (result.blocked) measurements.rejectedFrames[result.blocked] = (measurements.rejectedFrames[result.blocked] || 0) + 1;
           const phrase = gate.consider(result);
+          const visible = gate.visibleText;
+          // Unconfirmed guesses are neither displayed, manually replayable nor
+          // allowed to keep an obsolete queued utterance alive.
+          rawText.textContent = visible || 'Жду субтитры в рамке…';
+          state.latestText = visible;
+          speakTextButton.disabled = !visible;
+          speaker.observe(visible);
+          if (visible && speaker.pending && !similar(key(visible), key(speaker.pending.text))) speaker.pending = null;
           if (phrase) {
             lastOCR = { ...lastOCR, lineCount: result.lineCount, stableFrames: gate.count,
-              confirmationMs: gate.waitMs, candidateSince: gate.candidateSince,
-              ocrAccuracy: state.ocrModel || accuracySelect.value };
+              confirmationMs: gate.waitMs, candidateSince: gate.candidateSince, ocrAccuracy: 'fast',
+              afterSilenceMs: gate.resumedPauseMs };
             speaker.enqueue(phrase);
           }
 
           if (!state.reading) return;
 
-          if (result.text) {
-            status(
-              'Субтитры найдены · OCR ' +
-              Math.round(performance.now() - start) + ' мс'
-            );
-          } else if (result.blocked === 'symbols') {
-            status('Пропускаю реплику с мусорными символами.');
-          } else if (clean(data.text)) {
-            status(
-              'Текст пока не похож на субтитры. ' +
-              'Проверьте рамку и вид субтитров.'
-            );
+          if (visible) {
+            status('Субтитры найдены · OCR ' + Math.round(performance.now() - start) + ' мс');
           } else {
             status('Жду субтитры в рамке…');
           }
@@ -1511,6 +1423,7 @@
 
         state.reading = true;
         state.run++;
+        keepScreenOn();
         state.latestText = '';
         speakTextButton.disabled = true;
 

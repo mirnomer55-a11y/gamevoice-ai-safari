@@ -2,22 +2,8 @@ const clean=text=>String(text||'').normalize('NFC').replace(/\s+/gu,' ').trim();
 const wordKey=text=>text.toLowerCase().replace(/ё/gu,'е');
 const tokens=text=>[...clean(text).matchAll(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu)];
 
-export function preserveLightDetails(pixels) {
-  // Retain grey/antialiased strokes instead of erasing them with a hard cutoff.
-  // Red/green brightness also retains the existing white/yellow subtitle mode.
-  for(let i=0;i<pixels.length;i+=4){
-    const value=255-Math.min(pixels[i],pixels[i+1]);
-    pixels[i]=pixels[i+1]=pixels[i+2]=value;
-  }
-  return pixels;
-}
-
-export function ocrProfile(mode) {
-  return mode==='accurate' ? {
-    id:'accurate',label:'Точнее',gzip:false,
-    langPath:'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec',
-    cachePath:'gamevoice-best-ru-e12c65a9-v1'
-  } : {
+export function ocrProfile() {
+  return {
     id:'fast',label:'Быстрее',gzip:true,
     langPath:'https://tessdata.projectnaptha.com/4.0.0_fast',cachePath:'gamevoice-fast-ru-v1'
   };
@@ -36,33 +22,46 @@ function ending(text) {return tokens(text).slice(-2).map(x=>wordKey(x[0])).join(
 export class CaptionGate {
   constructor(options) {
     this.options=options;
-    this.metrics={waitedFrames:0,stableAccepted:0,clearAccepted:0,continuedAccepted:0};
+    this.metrics={waitedFrames:0,stableAccepted:0,clearAccepted:0,continuedAccepted:0,
+      absentFrames:0,idleReturns:0,longestPauseMs:0,lastReturnPauseMs:0};
     this.reset();
   }
-  reset(){this.candidate='';this.count=0;this.spoken='';this.blankAt=null;this.candidateSince=null;this.waitMs=0;}
+  reset(){this.candidate='';this.count=0;this.spoken='';this.blankAt=null;this.blankHandled=false;
+    this.candidateSince=null;this.waitMs=0;this.visibleText='';this.resumedPauseMs=0;}
+  absent(now){
+    this.visibleText='';this.metrics.absentFrames++;
+    if(this.blankAt===null)this.blankAt=now;
+    const duration=now-this.blankAt;
+    this.metrics.longestPauseMs=Math.max(this.metrics.longestPauseMs,duration);
+    if(duration>=1000 && !this.blankHandled){this.blankHandled=true;this.options.onBlank?.();}
+  }
   consider(result) {
+    this.resumedPauseMs=0;
     const now=this.options.clock?.()??performance.now();
     if(!result.text){
       this.candidate='';this.count=0;this.candidateSince=null;this.waitMs=0;
-      if(this.blankAt===null)this.blankAt=now;
-      if(now-this.blankAt>1000)this.options.onBlank?.();
+      this.absent(now);
       return '';
     }
-    this.blankAt=null;
     const text=clean(result.text);
     const same=this.candidate && ending(text)===ending(this.candidate) &&
       this.options.similar(this.options.key(text),this.options.key(this.candidate));
     if(!same)this.candidateSince=now;
     this.waitMs=now-this.candidateSince;
     this.count=same?this.count+1:1;this.candidate=text;
+    const clear=result.confidence>=92 && result.tailConfidence>=85 && result.hasWords &&
+      result.visual && result.wordCount>=3 && !result.touchesEdge && /[.!?…][»”"')\]]*$/u.test(text);
+    if(!clear && (this.count<2 || result.confidence<70 || result.tailConfidence<45)){
+      this.metrics.waitedFrames++;this.absent(now);return '';
+    }
+    this.visibleText=text;
+    const pause=this.blankAt===null?0:now-this.blankAt;
+    if(pause>=5000){this.metrics.idleReturns++;this.metrics.lastReturnPauseMs=pause;this.resumedPauseMs=pause;}
+    this.metrics.longestPauseMs=Math.max(this.metrics.longestPauseMs,pause);
+    this.blankAt=null;this.blankHandled=false;
     const continuation=this.options.canContinue?.(text);
     if(!continuation && this.options.wasSpoken(text)){
       this.options.onDuplicate?.();return '';
-    }
-    const clear=result.confidence>=92 && result.tailConfidence>=85 && result.hasWords &&
-      !result.touchesEdge && /[.!?…][»”"')\]]*$/u.test(text);
-    if(!clear && (this.count<2 || result.confidence<58)){
-      this.metrics.waitedFrames++;return '';
     }
     if(continuation)this.metrics.continuedAccepted++;
     if(clear)this.metrics.clearAccepted++;else this.metrics.stableAccepted++;
