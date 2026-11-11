@@ -1,3 +1,4 @@
+import { captionTail } from './ocr-text.mjs?v=0.6.3';
 const LAB = new URL('../neural-lab/', import.meta.url);
 const VOICE_CACHE = 'gamevoice-neural-lab-v1';
 const now = () => performance.now();
@@ -136,7 +137,7 @@ export class NeuralSpeaker {
     this.context = null; this.sources = new Map();
     this.unlocked = Promise.resolve(); this.serial = Promise.resolve();
     this.metrics = { droppedBeforePlayback: 0, replacedPending: 0, played: 0,
-      completed: 0, scheduledChunks: 0, preloadedPending: 0, playbackGapsMs: [] };
+      completed: 0, scheduledChunks: 0, preloadedPending: 0, extendedCaptions: 0, appendedChunks: 0, playbackGapsMs: [] };
     this.blankAt = null;
   }
   async prepare() {
@@ -195,6 +196,7 @@ export class NeuralSpeaker {
     if (!this.options.isReading()) return;
     text = normalize(text);
     if (!text) return;
+    if (this.extendCaption(text)) return;
     if (this.options.canStart && !this.options.canStart(text)) return;
     const key = this.options.key(text);
     if (this.options.similar(key, this.current?.key)) return;
@@ -224,6 +226,24 @@ export class NeuralSpeaker {
     return !job.started && !job.manual && (job.abandon || this.freshPending());
   }
   freshPending() { return this.pending && now() - this.pending.time < 3000; }
+  canExtend(text) {
+    const job = this.current;
+    return !!job && !job.manual && this.valid(job) && !!captionTail(job.text, text);
+  }
+  extendCaption(text) {
+    if (!this.canExtend(text)) return false;
+    const job = this.current, tail = captionTail(job.text, text);
+    let chunks;
+    try { chunks = speechChunks(tail); } catch { return false; }
+    if (!chunks.length) return false;
+    job.text = text; job.key = this.options.key(text);
+    job.chunks.push(...chunks); job.finishing = false;
+    if (!job.extensions) this.metrics.extendedCaptions++;
+    job.extensions = (job.extensions || 0) + 1;
+    this.metrics.appendedChunks += chunks.length;
+    if (job.started) this.options.onUpdateText?.(text);
+    return true;
+  }
   begin(text, announcement, manual, metadata, queued = null) {
     if (!manual && this.options.canStart && !this.options.canStart(text)) {
       this.options.onStatus('Dmitri готов'); return;
@@ -332,7 +352,13 @@ export class NeuralSpeaker {
   async run(job) {
     this.options.onStatus('Dmitri готовит реплику…');
     let playing = null;
-    for (let i = 0; i < job.chunks.length; i++) {
+    for (let i = 0; ; i++) {
+      if (i >= job.chunks.length) {
+        if (playing && !await playing.ended) return;
+        playing = null;
+        // OCR may have recovered the ending while the last buffer was playing.
+        if (i >= job.chunks.length) break;
+      }
       let result = i === 0 && job.queued?.prepared ? await job.queued.prepared : null;
       if (!result) result = await this.generate(job, i);
       if (!result || !this.valid(job) || this.outdated(job)) break;
@@ -353,7 +379,8 @@ export class NeuralSpeaker {
     else {
       this.metrics.completed++;
       this.options.onComplete?.({ chunkCount: job.chunks.length,
-        playedChunks: job.playedChunks, elapsedMs: now() - job.acceptedAt, manual: job.manual });
+        playedChunks: job.playedChunks, extensions: job.extensions || 0,
+        elapsedMs: now() - job.acceptedAt, manual: job.manual });
     }
     this.current = null;
     const next = this.pending; this.pending = null;
@@ -362,5 +389,6 @@ export class NeuralSpeaker {
     } else this.options.onStatus('Dmitri готов');
   }
 }
+
 
 

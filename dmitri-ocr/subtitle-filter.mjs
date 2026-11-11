@@ -127,3 +127,4 @@ export class SubtitleFilter {
     this.history.push(value);if(this.history.length>this.maxEntries)this.history.shift();
   }
 }
+

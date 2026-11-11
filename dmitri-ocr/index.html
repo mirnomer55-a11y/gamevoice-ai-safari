@@ -228,7 +228,7 @@
   <main class="app">
     <header>
       <h1>GameVoice AI</h1>
-      <span class="tag">Тест Dmitri + OCR · 0.6.2</span>
+      <span class="tag">Тест Dmitri + OCR · 0.6.3</span>
     </header>
 
     <section class="layout" aria-label="Озвучка субтитров">
@@ -289,6 +289,15 @@
         </div>
 
         <div>
+          <label for="ocrAccuracy">Распознавание</label>
+          <select id="ocrAccuracy">
+            <option value="fast">Быстрее</option>
+            <option value="accurate">Точнее</option>
+          </select>
+          <div class="small">«Точнее» может увеличить задержку. Для первой загрузки этого режима нужен интернет.</div>
+        </div>
+
+        <div>
           <span class="field-title">Текст из рамки</span>
           <div class="recognized" id="rawText">Пока текст не распознан</div>
 
@@ -322,8 +331,9 @@
   ></script>
 
   <script type="module">
-    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.2';
+    import { NeuralSpeaker } from './neural-speaker.mjs?v=0.6.3';
     import { SubtitleFilter } from './subtitle-filter.mjs?v=0.6.2';
+    import { CaptionGate, captionLines, lineQuality, ocrProfile, preserveLightDetails } from './ocr-text.mjs?v=0.6.3';
     (() => {
       'use strict';
 
@@ -339,13 +349,15 @@
       const rawText = $('rawText');
       const recognized = $('recognized');
       const processing = $('processing');
+      const accuracySelect = $('ocrAccuracy');
       const speakTextButton = $('speakText');
       const speech = window.speechSynthesis;
       const LOCAL_VOICE = 'local:dmitri';
       const isLocal = () => voiceSelect.value === LOCAL_VOICE;
-      const measurements = { version: '0.6.2', started: new Date().toISOString(), ocrFrames: 0, samples: [], completions: [] };
+      const measurements = { version: '0.6.3', started: new Date().toISOString(), ocrFrames: 0, samples: [], completions: [] };
       let lastOCR = null;
       let preparingVoice = false;
+      let changingOCR = false;
       function recordMeasurement(sample) {
         measurements.samples.push({ ...sample, at: new Date().toISOString() });
         if (measurements.samples.length > 100) measurements.samples.shift();
@@ -389,6 +401,7 @@
         worker: null,
         loading: null,
         workerTicket: 0,
+        scanTicket: 0,
         busy: false,
         timer: 0,
         regionVersion: 0,
@@ -470,50 +483,13 @@
       }
 
       const subtitleFilter = new SubtitleFilter();
-      const gate = {
-        candidate: '',
-        count: 0,
-        spoken: '',
-        blankAt: null,
-
-        reset() {
-          this.candidate = '';
-          this.count = 0;
-          this.spoken = '';
-          this.blankAt = null;
-        },
-
-        consider(result) {
-          if (!result.text) {
-            this.candidate = '';
-            this.count = 0;
-
-            if (this.blankAt === null) {
-              this.blankAt = performance.now();
-            }
-
-            if (performance.now() - this.blankAt > 1000) {
-              speaker.pending = null;
-            }
-
-            return '';
-          }
-
-          this.blankAt = null;
-
-          const next = key(result.text);
-          this.count = similar(next, this.candidate) ? this.count + 1 : 1;
-          this.candidate = next;
-
-          if (subtitleFilter.wasSpoken(result.text)) {
-            subtitleFilter.metrics.duplicateFrames++;
-            return '';
-          }
-          if (result.confidence < 72 && this.count < 2) return '';
-
-          return result.text;
-        }
-      };
+      const gate = new CaptionGate({
+        key, similar,
+        wasSpoken: text => subtitleFilter.wasSpoken(text),
+        canContinue: text => isLocal() && neural.canExtend(text),
+        onDuplicate: () => { subtitleFilter.metrics.duplicateFrames++; },
+        onBlank: () => { speaker.pending = null; }
+      });
 
       function loadVoices() {
         const previous = voiceSelect.value || setting('gva.dmitri-ocr.voice') || LOCAL_VOICE;
@@ -666,6 +642,11 @@
           updateButtons();
         },
         onStatus: speechStatus,
+        onUpdateText: text => {
+          subtitleFilter.remember(text);
+          recognized.textContent = text;
+          gate.spoken = key(text);
+        },
         onStart: (text, announcement, sample) => {
           speechStatus('Dmitri · синтез ' + Math.round(sample.synthesisMs) +
             ' мс · от готового текста до аудио ' + Math.round(sample.afterRecognitionMs) + ' мс');
@@ -675,6 +656,7 @@
             recognized.textContent = text;
           }
           recordMeasurement({ ...sample, cameraAndOCR: state.reading,
+            fromCandidateMs: sample.candidateSince == null ? null : performance.now() - sample.candidateSince,
             fromOcrStartMs: sample.ocrStartedAt == null ? null : performance.now() - sample.ocrStartedAt });
         },
         onComplete: sample => {
@@ -725,6 +707,7 @@
           cameraAndOCR: true, voice: isLocal() ? 'Dmitri' : voiceSelect.value,
           rate: Number(speedSelect.value), queue: { ...neural.metrics },
           filters: { ...subtitleFilter.metrics },
+          stability: { ...gate.metrics }, ocrAccuracy: state.ocrModel || accuracySelect.value,
           note: 'Audio times are scheduling estimates, not physical speaker/Bluetooth latency. No camera images are included.'
         };
         const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -764,6 +747,20 @@
         speaker.pending = null;
       });
 
+      accuracySelect.value = setting('gva.dmitri-ocr.accuracy') === 'accurate' ? 'accurate' : 'fast';
+      accuracySelect.addEventListener('change', async () => {
+        if (changingOCR) return;
+        changingOCR = true;
+        save('gva.dmitri-ocr.accuracy', accuracySelect.value);
+        stopReading('Меняю режим распознавания…');
+        discardWorker();
+        try {
+          if (state.stream) await getWorker();
+          status('Режим распознавания выбран. Начните озвучку.');
+        } catch (error) { status(error.message); }
+        finally { changingOCR = false; updateButtons(); }
+      });
+
       $('testVoice').addEventListener('click', () => {
         stopReading('Проверка голоса. После неё можно начать озвучку.');
         speaker.say('Проверка русского голоса. Всё готово.', true);
@@ -788,6 +785,7 @@
         speakTextButton.disabled = !state.latestText || preparingVoice || (local && !neural.ready);
         voiceSelect.disabled = preparingVoice;
         speedSelect.disabled = preparingVoice;
+        accuracySelect.disabled = preparingVoice || changingOCR || (!state.worker && !!state.loading);
 
         readButton.textContent = state.reading
           ? 'Остановить озвучку'
@@ -906,6 +904,9 @@
 
       function discardWorker() {
         state.workerTicket++;
+        state.scanTicket++;
+        state.busy = false;
+        clearTimeout(state.timer);
 
         const worker = state.worker;
         state.worker = null;
@@ -931,9 +932,10 @@
         }
 
         const ticket = ++state.workerTicket;
+        const profile = ocrProfile(accuracySelect.value);
         let initializingWorker = null;
 
-        status('Загружаю распознавание русского текста…');
+        status('Загружаю распознавание русского текста · ' + profile.label + '…');
 
         let rejectFatal;
         const fatal = new Promise((_, reject) => {
@@ -945,9 +947,9 @@
             'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
           corePath:
             'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
-          langPath:
-            'https://tessdata.projectnaptha.com/4.0.0_fast',
-          cachePath: 'gamevoice-fast-ru-v1',
+          langPath: profile.langPath,
+          gzip: profile.gzip,
+          cachePath: profile.cachePath,
           cacheMethod: 'write',
 
           errorHandler: error => {
@@ -984,6 +986,7 @@
           });
 
           state.worker = worker;
+          state.ocrModel = profile.id;
           updateButtons();
           return worker;
         }).catch(error => {
@@ -999,6 +1002,7 @@
           throw error;
         });
 
+        updateButtons();
         return state.loading;
       }
 
@@ -1259,6 +1263,20 @@
         colourPixels.set(pixels);
         frameColours = { data: colourPixels, width: sourceCanvas.width, height: sourceCanvas.height,
           mode: 'light', threshold, offsetX: 0, offsetY: 0 };
+        if (accuracySelect.value === 'accurate') {
+          // Keep faint final letters and every line inside the user's ROI.
+          frameColours.threshold = Math.min(threshold, 180);
+          preserveLightDetails(pixels);
+          context.putImageData(image, 0, 0);
+          ocrCanvas.width = sourceCanvas.width + 24;
+          ocrCanvas.height = sourceCanvas.height + 24;
+          frameColours.offsetX = frameColours.offsetY = -12;
+          const output = ocrCanvas.getContext('2d');
+          output.fillStyle = 'white';
+          output.fillRect(0, 0, ocrCanvas.width, ocrCanvas.height);
+          output.drawImage(sourceCanvas, 12, 12);
+          return ocrCanvas;
+        }
         const rows = new Uint32Array(sourceCanvas.height);
 
         for (let i = 0; i < pixels.length; i += 4) {
@@ -1343,58 +1361,15 @@
       }
 
       function readResult(data) {
-        const lines = (data.blocks || []).flatMap(block =>
-          (block.paragraphs || []).flatMap(
-            paragraph => paragraph.lines || []
-          )
-        );
-
-        if (!lines.length && clean(data.text)) {
-          lines.push({
-            text: data.text,
-            confidence: data.confidence,
-            bbox: { y0: 0 }
-          });
-        }
-
-        const valid = lines.filter(line => {
-          const text = clean(line.text);
-          const russian = (text.match(/[а-яё]/gi) || []).length;
-          const letters = (text.match(/[а-яёa-z]/gi) || []).length;
-          const visibleLength = Math.max(
-            1,
-            text.replace(/\s/g, '').length
-          );
-
-          return (
-            russian >= 2 &&
-            letters / visibleLength > 0.55 &&
-            Number(line.confidence) >= 35 &&
-            (letters >= 4 || Number(line.confidence) >= 80)
-          );
-        }).sort((a, b) =>
-          b.text.length * Number(b.confidence) -
-          a.text.length * Number(a.confidence)
-        ).slice(0, 3).sort((a, b) =>
-          (a.bbox?.y0 || 0) - (b.bbox?.y0 || 0)
-        );
-
-        const length = valid.reduce(
-          (sum, line) => sum + line.text.length,
-          0
-        );
-
+        const valid = captionLines(data);
+        const quality = lineQuality(valid, frameColours);
+        if (valid.length > 6) return { text: '', confidence: 0, ...quality, blocked: 'many-lines' };
         const filtered = subtitleFilter.sanitize(valid, frameColours);
+        if (filtered.text.length > 500) return { text: '', confidence: 0, ...quality, blocked: 'length' };
+        const length = valid.reduce((sum, line) => sum + line.text.length, 0);
         return {
-          ...filtered,
-          text: clean(filtered.text),
-          confidence: length
-            ? valid.reduce(
-                (sum, line) =>
-                  sum + Number(line.confidence) * line.text.length,
-                0
-              ) / length
-            : 0
+          ...filtered, ...quality, text: clean(filtered.text),
+          confidence: length ? valid.reduce((sum, line) => sum + Number(line.confidence) * line.text.length, 0) / length : 0
         };
       }
 
@@ -1405,6 +1380,7 @@
         const region = state.regionVersion;
         const worker = state.worker;
         state.busy = true;
+        const scanTicket = ++state.scanTicket;
 
         try {
           if (state.drag) return;
@@ -1470,7 +1446,12 @@
           }
 
           const phrase = gate.consider(result);
-          if (phrase) speaker.enqueue(phrase);
+          if (phrase) {
+            lastOCR = { ...lastOCR, lineCount: result.lineCount, stableFrames: gate.count,
+              confirmationMs: gate.waitMs, candidateSince: gate.candidateSince,
+              ocrAccuracy: state.ocrModel || accuracySelect.value };
+            speaker.enqueue(phrase);
+          }
 
           if (!state.reading) return;
 
@@ -1495,11 +1476,10 @@
             discardWorker();
           }
         } finally {
-          frameColours = null;
-          state.busy = false;
-
-          if (state.reading) {
-            state.timer = setTimeout(scan, 200);
+          if (scanTicket === state.scanTicket) {
+            frameColours = null;
+            state.busy = false;
+            if (state.reading) state.timer = setTimeout(scan, 200);
           }
         }
       }
@@ -1574,5 +1554,6 @@
   </script>
 </body>
 </html>
+
 
 
